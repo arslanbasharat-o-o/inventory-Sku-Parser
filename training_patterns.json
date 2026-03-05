@@ -1,0 +1,50 @@
+{
+  "generated_at": "2026-03-05T19:50:59.590503+00:00",
+  "rows_total": 3,
+  "rows_parsed": 3,
+  "ngram_frequency_threshold": 5,
+  "pattern_ngram_range": [
+    2,
+    4
+  ],
+  "frequent_phrase_candidates": 0,
+  "common_title_patterns": [
+    {
+      "pattern": "button flex",
+      "count": 2,
+      "top_code": "P/V-F"
+    },
+    {
+      "pattern": "power button flex",
+      "count": 2,
+      "top_code": "PB-F"
+    },
+    {
+      "pattern": "power button",
+      "count": 2,
+      "top_code": "P/V-F"
+    },
+    {
+      "pattern": "charging port",
+      "count": 1,
+      "top_code": "CP"
+    }
+  ],
+  "common_part_abbreviations": [
+    {
+      "code": "PB-F",
+      "count": 2
+    },
+    {
+      "code": "CP",
+      "count": 1
+    }
+  ],
+  "model_detection_patterns": [
+    {
+      "model_code": "A525",
+      "count": 3
+    }
+  ],
+  "promoted_to_learned_patterns": 0
+}

@@ -1,0 +1,13 @@
+.venv/
+__pycache__/
+.pytest_cache/
+*.pyc
+*.pyo
+*.pyd
+*.log
+uploads/
+outputs/
+frontend/.next/
+frontend/node_modules/
+frontend/.git/
+.git/

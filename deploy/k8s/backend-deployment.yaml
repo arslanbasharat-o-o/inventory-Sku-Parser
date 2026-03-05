@@ -1,0 +1,59 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: sku-parser-api
+  labels:
+    app: sku-parser-api
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: sku-parser-api
+  template:
+    metadata:
+      labels:
+        app: sku-parser-api
+    spec:
+      containers:
+        - name: api
+          image: sku-parser-api:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 5000
+          env:
+            - name: SKU_PARSER_DATA_DIR
+              value: /data
+            - name: MAX_CONCURRENT_PARSE_JOBS
+              value: "2"
+            - name: WEB_CONCURRENCY
+              value: "4"
+          resources:
+            requests:
+              cpu: "500m"
+              memory: "1Gi"
+            limits:
+              cpu: "2"
+              memory: "3Gi"
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: 5000
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 5
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 5000
+            initialDelaySeconds: 20
+            periodSeconds: 15
+            timeoutSeconds: 5
+            failureThreshold: 3
+          volumeMounts:
+            - name: shared-data
+              mountPath: /data
+      volumes:
+        - name: shared-data
+          persistentVolumeClaim:
+            claimName: sku-parser-shared-data
