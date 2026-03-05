@@ -11,10 +11,14 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt ./
-RUN pip install --upgrade pip && pip install -r requirements.txt
+# Optional vector stack (sentence-transformers/faiss) is intentionally
+# excluded in this runtime image to keep builds stable and fast.
+RUN pip install --upgrade pip \
+    && grep -vE '^(sentence-transformers|faiss-cpu)' requirements.txt > /tmp/requirements-runtime.txt \
+    && pip install -r /tmp/requirements-runtime.txt
 
-COPY app.py sku_parser.py gunicorn.conf.py ./
-COPY part_code_rules.json mobile_parts_dictionary.json mobile_parts_ontology.json learned_parts.json unknown_parts_log.json ./
+COPY app.py fastapi_app.py structured_sku_parser.py ai_parser.py sku_parser.py sku_intelligence_engine.py gunicorn.conf.py ./
+COPY part_code_rules.json mobile_parts_dictionary.json mobile_parts_ontology.json learned_parts.json learned_patterns.json learned_spelling_variations.json spelling_corrections.json training_patterns.json unknown_parts_log.json ./
 
 RUN mkdir -p /data/uploads /data/outputs
 
