@@ -177,3 +177,14 @@ def test_process_inventory_excel_helper_function(tmp_path: Path) -> None:
 
     assert output_path.exists()
     assert result_df.loc[0, "Generated SKU"] == "GALAXY A71 A716 CP HJ"
+
+
+def test_analyze_title_accepts_product_description_hint(tmp_path: Path) -> None:
+    service = make_service(tmp_path)
+    execution = service.analyze_title(
+        title="",
+        product_description="Samsung Galaxy A52 A525 Battery replacement part",
+    )
+
+    assert execution.parsed.sku == "GALAXY A52 A525 BATT"
+    assert execution.parse_status == "parsed"

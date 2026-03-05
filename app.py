@@ -168,12 +168,13 @@ def create_app() -> Flask:
         title = str(payload.get("title", "")).strip()
         product_sku = str(payload.get("product_sku", "")).strip()
         product_web_sku = str(payload.get("product_web_sku", "")).strip()
+        product_description = str(payload.get("product_description", "")).strip()
 
-        if not title and not product_sku and not product_web_sku:
+        if not title and not product_sku and not product_web_sku and not product_description:
             return {"error": "Provide at least a title or SKU hint."}, 400
 
         try:
-            sku = generate_sku(title, product_sku, product_web_sku)
+            sku = generate_sku(title, product_sku, product_web_sku, product_description)
         except Exception as exc:
             return {"error": f"Failed to generate SKU: {exc}"}, 500
 
@@ -181,6 +182,7 @@ def create_app() -> Flask:
             "title": title,
             "product_sku": product_sku,
             "product_web_sku": product_web_sku,
+            "product_description": product_description,
             "generated_sku": sku,
             "parse_status": "parsed" if sku != NOT_UNDERSTANDABLE else "not_understandable",
         }

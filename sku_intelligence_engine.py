@@ -1725,9 +1725,11 @@ class SKUIntelligenceEngine:
         product_name: str,
         product_sku: str,
         product_web_sku: str,
+        product_description: str,
     ) -> tuple[str, float, str, str, str, str, str, str, str]:
-        normalized_title = self.normalize_text(product_name)
-        normalized_hint = self.normalize_text(f"{product_sku} {product_web_sku}")
+        title_source = f"{product_name} {product_description}".strip()
+        normalized_title = self.normalize_text(title_source)
+        normalized_hint = self.normalize_text(f"{product_sku} {product_web_sku} {product_description}")
         corrected_title, correction_confidence, correction_method, _corrections = self._normalize_with_token_corrections_scored(
             normalized_title,
             learn=False,
@@ -1747,7 +1749,7 @@ class SKUIntelligenceEngine:
             )
 
         brand, model = self._detect_brand_model(corrected_title)
-        model_code = self._extract_model_code(str(product_name), model=f"{brand} {model}".strip())
+        model_code = self._extract_model_code(title_source, model=f"{brand} {model}".strip())
         if not model_code and normalized_hint:
             model_code = self._extract_model_code(normalized_hint, model=f"{brand} {model}".strip())
 
@@ -1814,13 +1816,16 @@ class SKUIntelligenceEngine:
         product_name: object,
         product_sku: object = "",
         product_web_sku: object = "",
+        product_description: object = "",
     ) -> ParseResult:
         name_text = str(product_name or "")
         sku_hint_text = str(product_sku or "")
         web_hint_text = str(product_web_sku or "")
+        description_text = str(product_description or "")
+        combined_title_text = f"{name_text} {description_text}".strip()
 
         # Learn frequent typo variants outside cached path so counters stay accurate.
-        self._normalize_with_token_corrections(self.normalize_text(name_text), learn=True)
+        self._normalize_with_token_corrections(self.normalize_text(combined_title_text), learn=True)
 
         (
             sku,
@@ -1832,7 +1837,7 @@ class SKUIntelligenceEngine:
             part_code,
             variant,
             color,
-        ) = self._parse_cached(name_text, sku_hint_text, web_hint_text)
+        ) = self._parse_cached(name_text, sku_hint_text, web_hint_text, description_text)
 
         parsed = ParseResult(
             product_name=name_text,
@@ -1874,11 +1879,13 @@ class SKUIntelligenceEngine:
         title: object,
         product_sku: object = "",
         product_web_sku: object = "",
+        product_description: object = "",
     ) -> dict[str, object]:
         title_text = str(title or "")
-        parsed = self.parse_title(title_text, product_sku, product_web_sku)
+        description_text = str(product_description or "")
+        parsed = self.parse_title(title_text, product_sku, product_web_sku, description_text)
 
-        normalized = self.normalize_text(title_text)
+        normalized = self.normalize_text(f"{title_text} {description_text}".strip())
         corrected_title, _corr_conf, _corr_method, corrections = self._normalize_with_token_corrections_scored(
             normalized,
             learn=False,
@@ -1892,6 +1899,7 @@ class SKUIntelligenceEngine:
 
         return {
             "title": title_text,
+            "product_description": description_text,
             "normalized_title": normalized,
             "interpreted_title": corrected_title,
             "brand": manufacturer,

@@ -80,6 +80,7 @@ export default function Dashboard() {
   const [singleTitle, setSingleTitle] = useState("");
   const [singleProductSku, setSingleProductSku] = useState("");
   const [singleWebSku, setSingleWebSku] = useState("");
+  const [singleDescription, setSingleDescription] = useState("");
   const [singleSkuResult, setSingleSkuResult] = useState<string | null>(null);
   const [singleStatus, setSingleStatus] = useState<"parsed" | "not_understandable" | null>(null);
   const [singleError, setSingleError] = useState<string | null>(null);
@@ -93,8 +94,9 @@ export default function Dashboard() {
     const title = singleTitle.trim();
     const productSku = singleProductSku.trim();
     const productWebSku = singleWebSku.trim();
+    const productDescription = singleDescription.trim();
 
-    if (!title && !productSku && !productWebSku) {
+    if (!title && !productSku && !productWebSku && !productDescription) {
       latestSingleAnalysisRequestRef.current += 1;
       setSingleAnalysis(null);
       setSingleAnalysisError(null);
@@ -113,6 +115,7 @@ export default function Dashboard() {
           title,
           product_sku: productSku,
           product_web_sku: productWebSku,
+          product_description: productDescription,
         });
 
         if (latestSingleAnalysisRequestRef.current !== requestId) {
@@ -144,7 +147,7 @@ export default function Dashboard() {
     }, 350);
 
     return () => window.clearTimeout(timeout);
-  }, [singleTitle, singleProductSku, singleWebSku]);
+  }, [singleTitle, singleProductSku, singleWebSku, singleDescription]);
 
   // Drag and drop handlers
   const handleDragEnter = (e: React.DragEvent) => {
@@ -233,7 +236,7 @@ export default function Dashboard() {
   };
 
   const handleGenerateSingleSku = async () => {
-    if (!singleTitle.trim() && !singleProductSku.trim() && !singleWebSku.trim()) {
+    if (!singleTitle.trim() && !singleProductSku.trim() && !singleWebSku.trim() && !singleDescription.trim()) {
       setSingleError("Enter a title or SKU hint first.");
       return;
     }
@@ -246,6 +249,7 @@ export default function Dashboard() {
         title: singleTitle,
         product_sku: singleProductSku,
         product_web_sku: singleWebSku,
+        product_description: singleDescription,
       });
       setSingleSkuResult(response.generated_sku);
       setSingleStatus(response.parse_status);
@@ -270,6 +274,7 @@ export default function Dashboard() {
     setSingleTitle("");
     setSingleProductSku("");
     setSingleWebSku("");
+    setSingleDescription("");
     setSingleSkuResult(null);
     setSingleStatus(null);
     setSingleError(null);
@@ -398,6 +403,19 @@ export default function Dashboard() {
                     onChange={(e) => setSingleProductSku(e.target.value)}
                     className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900 focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-200"
                     placeholder="A525PBF"
+                  />
+                </div>
+
+                <div>
+                  <label className="text-xs font-semibold text-gray-600 uppercase tracking-wide">
+                    Product Description (optional)
+                  </label>
+                  <textarea
+                    value={singleDescription}
+                    onChange={(e) => setSingleDescription(e.target.value)}
+                    rows={2}
+                    className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900 focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-200"
+                    placeholder="Extra description text to improve parsing..."
                   />
                 </div>
               </div>

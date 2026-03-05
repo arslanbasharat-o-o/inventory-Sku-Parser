@@ -26,12 +26,14 @@ export interface SingleSkuRequest {
     title: string;
     product_sku?: string;
     product_web_sku?: string;
+    product_description?: string;
 }
 
 export interface SingleSkuResponse {
     title: string;
     product_sku: string;
     product_web_sku: string;
+    product_description?: string;
     generated_sku: string;
     parse_status: "parsed" | "not_understandable";
 }
@@ -40,6 +42,7 @@ export interface AnalyzeTitleRequest {
     title: string;
     product_sku?: string;
     product_web_sku?: string;
+    product_description?: string;
 }
 
 export interface AnalyzeTitleCorrection {

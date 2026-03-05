@@ -105,8 +105,17 @@ class StructuredSKUParserService:
         text = RE_MULTI_SPACE.sub(" ", text)
         return text.strip()
 
-    def _cache_key(self, title: str, product_sku: str, product_web_sku: str) -> str:
-        digest_src = f"{title}|{product_sku.strip()}|{product_web_sku.strip()}"
+    def _cache_key(
+        self,
+        title: str,
+        product_sku: str,
+        product_web_sku: str,
+        product_description: str,
+    ) -> str:
+        digest_src = (
+            f"{title}|{product_sku.strip()}|{product_web_sku.strip()}|"
+            f"{product_description.strip()}"
+        )
         return hashlib.sha256(digest_src.encode("utf-8")).hexdigest()
 
     def _cache_get(self, key: str) -> ParsedSKUResult | None:
@@ -242,11 +251,13 @@ class StructuredSKUParserService:
         title: str,
         product_sku: str,
         product_web_sku: str,
+        product_description: str,
     ) -> tuple[ParsedSKUResult, str, list[dict[str, str]]]:
         payload = rule_analyze_title(
             title,
             product_sku_hint=product_sku,
             product_web_sku_hint=product_web_sku,
+            product_description_hint=product_description,
         )
         parser_reason = str(payload.get("reason", "rule"))
         correction_pairs, correction_strings = self._format_correction_pairs(payload.get("corrections", []))
@@ -325,12 +336,24 @@ class StructuredSKUParserService:
         title: str,
         product_sku: str = "",
         product_web_sku: str = "",
+        product_description: str = "",
     ) -> StructuredParseExecution:
         normalized_title = self.normalize_title(title)
-        if not normalized_title and not product_sku.strip() and not product_web_sku.strip():
+        normalized_description = self.normalize_title(product_description)
+        if (
+            not normalized_title
+            and not product_sku.strip()
+            and not product_web_sku.strip()
+            and not normalized_description
+        ):
             raise ValueError("Provide at least a title or SKU hint.")
 
-        cache_key = self._cache_key(normalized_title, product_sku, product_web_sku)
+        cache_key = self._cache_key(
+            normalized_title,
+            product_sku,
+            product_web_sku,
+            normalized_description,
+        )
         cached = self._cache_get(cache_key)
         if cached is not None:
             parse_status: Literal["parsed", "not_understandable"] = (
@@ -349,6 +372,7 @@ class StructuredSKUParserService:
             title=normalized_title,
             product_sku=product_sku,
             product_web_sku=product_web_sku,
+            product_description=normalized_description,
         )
 
         source: Literal["rule", "ai", "cache"] = "rule"
@@ -404,18 +428,25 @@ class StructuredSKUParserService:
 
         product_sku_col = "Product SKU" if "Product SKU" in df.columns else ""
         web_sku_col = "Product Web SKU" if "Product Web SKU" in df.columns else ""
+        description_col = ""
+        for candidate in ("Product Description", "Description"):
+            if candidate in df.columns:
+                description_col = candidate
+                break
 
         rows: list[dict[str, Any]] = []
         for _, row in df.iterrows():
             title = str(row.get(title_column, "") or "")
             product_sku = str(row.get(product_sku_col, "") or "") if product_sku_col else ""
             product_web_sku = str(row.get(web_sku_col, "") or "") if web_sku_col else ""
+            product_description = str(row.get(description_col, "") or "") if description_col else ""
 
             try:
                 execution = self.analyze_title(
                     title=title,
                     product_sku=product_sku,
                     product_web_sku=product_web_sku,
+                    product_description=product_description,
                 )
                 parsed = execution.parsed
                 parse_status = execution.parse_status

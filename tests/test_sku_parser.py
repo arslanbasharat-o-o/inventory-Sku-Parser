@@ -285,3 +285,13 @@ def test_analyze_title_payload_contains_details_and_corrections() -> None:
     assert payload["sku"] == "GALAXY A52 CP"
     assert payload["parse_status"] == "parsed"
     assert any(item["from"] == "samsng" and item["to"] == "samsung" for item in payload["corrections"])
+
+
+def test_product_description_hint_can_drive_parsing_when_title_is_sparse() -> None:
+    sku = generate_sku(
+        "",
+        "",
+        "",
+        "Samsung Galaxy A52 A525 Battery replacement part",
+    )
+    assert sku == "GALAXY A52 A525 BATT"

@@ -88,21 +88,33 @@ def detect_part(
     title: object,
     product_sku_hint: object = "",
     product_web_sku_hint: object = "",
+    product_description_hint: object = "",
 ) -> str:
     _sync_engine_paths_from_globals()
-    return _ENGINE.parse_title(title, product_sku_hint, product_web_sku_hint).part_code
+    return _ENGINE.parse_title(
+        title,
+        product_sku_hint,
+        product_web_sku_hint,
+        product_description_hint,
+    ).part_code
 
 
 def interpret_title_semantically(
     title: object,
     product_sku_hint: object = "",
     product_web_sku_hint: object = "",
+    product_description_hint: object = "",
 ) -> dict[str, object]:
     _sync_engine_paths_from_globals()
-    parsed = _ENGINE.parse_title(title, product_sku_hint, product_web_sku_hint)
+    parsed = _ENGINE.parse_title(
+        title,
+        product_sku_hint,
+        product_web_sku_hint,
+        product_description_hint,
+    )
     return {
         "title_text": str(title),
-        "hint_text": f"{product_sku_hint} {product_web_sku_hint}".strip(),
+        "hint_text": f"{product_sku_hint} {product_web_sku_hint} {product_description_hint}".strip(),
         "model_component": " ".join(token for token in (parsed.brand, parsed.model) if token).strip(),
         "model_code": parsed.model_code,
         "part": parsed.part_code,
@@ -120,18 +132,30 @@ def generate_sku(
     title: object,
     product_sku_hint: object = "",
     product_web_sku_hint: object = "",
+    product_description_hint: object = "",
 ) -> str:
     _sync_engine_paths_from_globals()
-    return _ENGINE.parse_title(title, product_sku_hint, product_web_sku_hint).suggested_sku
+    return _ENGINE.parse_title(
+        title,
+        product_sku_hint,
+        product_web_sku_hint,
+        product_description_hint,
+    ).suggested_sku
 
 
 def generate_sku_with_confidence(
     title: object,
     product_sku_hint: object = "",
     product_web_sku_hint: object = "",
+    product_description_hint: object = "",
 ) -> tuple[str, float, str, str]:
     _sync_engine_paths_from_globals()
-    parsed = _ENGINE.parse_title(title, product_sku_hint, product_web_sku_hint)
+    parsed = _ENGINE.parse_title(
+        title,
+        product_sku_hint,
+        product_web_sku_hint,
+        product_description_hint,
+    )
     return (
         parsed.suggested_sku,
         parsed.confidence_score,
@@ -144,9 +168,15 @@ def analyze_title(
     title: object,
     product_sku_hint: object = "",
     product_web_sku_hint: object = "",
+    product_description_hint: object = "",
 ) -> dict[str, object]:
     _sync_engine_paths_from_globals()
-    return _ENGINE.analyze_title(title, product_sku_hint, product_web_sku_hint)
+    return _ENGINE.analyze_title(
+        title,
+        product_sku_hint,
+        product_web_sku_hint,
+        product_description_hint,
+    )
 
 
 def process_inventory(input_file: str | Path, output_file: str | Path) -> pd.DataFrame:

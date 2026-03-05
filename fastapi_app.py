@@ -28,6 +28,7 @@ class AnalyzeTitleRequest(BaseModel):
     title: str = Field(default="", description="Raw product title")
     product_sku: str = Field(default="", description="Optional SKU hint")
     product_web_sku: str = Field(default="", description="Optional web SKU hint")
+    product_description: str = Field(default="", description="Optional product description")
 
 
 class CorrectionItem(BaseModel):
@@ -120,7 +121,12 @@ def healthz() -> dict[str, str]:
 @app.post("/analyze-title", response_model=AnalyzeTitleResponse)
 def analyze_title_api(payload: AnalyzeTitleRequest) -> AnalyzeTitleResponse:
     title = payload.title.strip()
-    if not title and not payload.product_sku.strip() and not payload.product_web_sku.strip():
+    if (
+        not title
+        and not payload.product_sku.strip()
+        and not payload.product_web_sku.strip()
+        and not payload.product_description.strip()
+    ):
         raise HTTPException(status_code=400, detail="Provide at least a title or SKU hint.")
 
     try:
@@ -128,6 +134,7 @@ def analyze_title_api(payload: AnalyzeTitleRequest) -> AnalyzeTitleResponse:
             title=title,
             product_sku=payload.product_sku,
             product_web_sku=payload.product_web_sku,
+            product_description=payload.product_description,
         )
     except StructuredParseError:
         # Required failsafe for invalid structured model output after retry.

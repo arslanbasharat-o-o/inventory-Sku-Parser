@@ -59,6 +59,8 @@ npm run dev
 - `GET /cache/status`
 - `DELETE /cache`
 
+`POST /analyze-title` and `POST /generate-sku-api` support optional `product_description` to improve parsing when titles are incomplete.
+
 ## Validation
 Run full parser validation:
 ```bash
