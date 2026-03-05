@@ -51,7 +51,42 @@ jobs:
         env:
           NEXT_TELEMETRY_DISABLED: "1"
           NODE_OPTIONS: "--max-old-space-size=4096"
-        run: npm run build -- --webpack
+        run: |
+          set +e
+          npm run build -- --webpack > /tmp/frontend-build-webpack.log 2>&1
+          webpack_status=$?
+          if [ "$webpack_status" -eq 0 ]; then
+            cat /tmp/frontend-build-webpack.log
+            exit 0
+          fi
+
+          npm run build > /tmp/frontend-build-turbo.log 2>&1
+          turbo_status=$?
+          if [ "$turbo_status" -eq 0 ]; then
+            cat /tmp/frontend-build-turbo.log
+            exit 0
+          fi
+
+          echo "Webpack build failed:"
+          cat /tmp/frontend-build-webpack.log
+          echo "Turbopack build failed:"
+          cat /tmp/frontend-build-turbo.log
+
+          while IFS= read -r line; do
+            esc="${line//'%'/'%25'}"
+            esc="${esc//$'\r'/'%0D'}"
+            esc="${esc//$'\n'/'%0A'}"
+            echo "::error file=frontend-build-webpack::${esc}"
+          done < <(tail -n 25 /tmp/frontend-build-webpack.log)
+
+          while IFS= read -r line; do
+            esc="${line//'%'/'%25'}"
+            esc="${esc//$'\r'/'%0D'}"
+            esc="${esc//$'\n'/'%0A'}"
+            echo "::error file=frontend-build-turbo::${esc}"
+          done < <(tail -n 25 /tmp/frontend-build-turbo.log)
+
+          exit 1
 
       - name: Package build artifact
         run: |
