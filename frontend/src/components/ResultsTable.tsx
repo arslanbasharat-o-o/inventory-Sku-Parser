@@ -26,7 +26,6 @@ import {
 
 interface ResultsTableProps {
     data: ParsedRow[];
-    onDupStats?: (skuDups: number, titleDups: number) => void;
 }
 
 // ─── Editable cell ─────────────────────────────────────────────────────────────
@@ -178,7 +177,7 @@ const DEFAULT_WIDTHS: Record<string, number> = {
 const COL_IDS = ["Product Name", "Product SKU", "Product Web SKU", "Product New SKU", "SKU Duplicate", "Title Duplicate"];
 
 // ─── Main component ────────────────────────────────────────────────────────────
-export function ResultsTable({ data, onDupStats }: ResultsTableProps) {
+export function ResultsTable({ data }: ResultsTableProps) {
     const [searchInput, setSearchInput] = useState("");
     const [globalFilter, setGlobalFilter] = useState("");
     const [columnFilters, setColumnFilters] = useState<ColumnFiltersState>([]);
@@ -376,6 +375,8 @@ export function ResultsTable({ data, onDupStats }: ResultsTableProps) {
         },
     ], [rowEdits, handleCellSave]);
 
+    // TanStack Table returns functions/hooks that trigger this lint rule by design.
+    // eslint-disable-next-line react-hooks/incompatible-library
     const table = useReactTable({
         data: baseData, columns,
         state: { sorting, globalFilter, columnFilters },
