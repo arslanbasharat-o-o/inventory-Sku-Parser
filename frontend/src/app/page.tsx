@@ -8,15 +8,6 @@ import { analyzeTitle, parseInventory, downloadProcessedFileUrl, generateSingleS
 import { AnalyzeTitleResponse, ParseResponse } from "@/types";
 import { AlertTriangle, CheckCircle2, Box, Loader2, Sparkles } from "lucide-react";
 
-const STORAGE_KEY = "sku_parser_last_result";
-const EXAMPLE_TITLES = [
-  "Samsung A52 Charging Port",
-  "Galaxy A50 Battery",
-  "Pixel 7 Pro Back Camera",
-  "Samsung A30 Power Volume Flex",
-  "Googel Pixle 9A Battry",
-];
-
 function confidenceMeta(confidence: number) {
   if (confidence > 0.9) {
     return {
@@ -86,7 +77,6 @@ export default function Dashboard() {
   const [isGenerating, setIsGenerating] = useState(false);
   const [data, setData] = useState<ParseResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [restoredFromCache, setRestoredFromCache] = useState(false);
   const [singleTitle, setSingleTitle] = useState("");
   const [singleProductSku, setSingleProductSku] = useState("");
   const [singleWebSku, setSingleWebSku] = useState("");
@@ -98,20 +88,6 @@ export default function Dashboard() {
   const [singleAnalysisError, setSingleAnalysisError] = useState<string | null>(null);
   const [isAnalyzingSingle, setIsAnalyzingSingle] = useState(false);
   const latestSingleAnalysisRequestRef = useRef(0);
-
-  // Restore from localStorage on mount
-  useEffect(() => {
-    try {
-      const saved = localStorage.getItem(STORAGE_KEY);
-      if (saved) {
-        const parsed: ParseResponse = JSON.parse(saved);
-        setData(parsed);
-        setRestoredFromCache(true);
-      }
-    } catch {
-      // ignore corrupt data
-    }
-  }, []);
 
   useEffect(() => {
     const title = singleTitle.trim();
@@ -226,8 +202,6 @@ export default function Dashboard() {
     try {
       const response = await parseInventory(file);
       setData(response);
-      setRestoredFromCache(false);
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(response));
     } catch (err) {
       console.error(err);
       setError(
@@ -246,8 +220,6 @@ export default function Dashboard() {
     setData(null);
     setFile(null);
     setError(null);
-    setRestoredFromCache(false);
-    localStorage.removeItem(STORAGE_KEY);
   };
 
   const handleDownload = () => {
@@ -346,24 +318,8 @@ export default function Dashboard() {
           </div>
         )}
 
-        {/* Restored-from-cache banner */}
-        {restoredFromCache && !error && (
-          <div className="bg-amber-50 border border-amber-300 text-amber-900 px-4 py-3 rounded-xl flex items-center gap-3 shadow-sm">
-            <AlertTriangle size={18} className="text-amber-500 flex-shrink-0" />
-            <p className="text-sm font-medium flex-1">
-              ⚠️ Showing <strong>old cached results</strong> — duplicate counts may be incorrect. Upload your file and click <strong>Generate SKUs</strong> to get fresh accurate results.
-            </p>
-            <button
-              onClick={handleClear}
-              className="text-xs font-semibold bg-amber-200 hover:bg-amber-300 text-amber-900 px-3 py-1.5 rounded-lg transition-colors whitespace-nowrap"
-            >
-              Clear Cache
-            </button>
-          </div>
-        )}
-
         {/* Success Alert */}
-        {data && !error && !restoredFromCache && (
+        {data && !error && (
           <div
             style={{ animation: "fadeSlideIn 300ms cubic-bezier(0.22, 1, 0.36, 1) both" }}
             className="bg-emerald-50 border border-emerald-200 text-emerald-800 px-4 py-3 rounded-xl flex items-center gap-3 shadow-sm"
@@ -401,47 +357,16 @@ export default function Dashboard() {
                   />
                 </div>
 
-                <div className="grid grid-cols-1 gap-3">
-                  <div>
-                    <label className="text-xs font-semibold text-gray-600 uppercase tracking-wide">
-                      Product SKU (optional)
-                    </label>
-                    <input
-                      value={singleProductSku}
-                      onChange={(e) => setSingleProductSku(e.target.value)}
-                      className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900 focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-200"
-                      placeholder="A525PBF"
-                    />
-                  </div>
-                  <div>
-                    <label className="text-xs font-semibold text-gray-600 uppercase tracking-wide">
-                      Product Web SKU (optional)
-                    </label>
-                    <input
-                      value={singleWebSku}
-                      onChange={(e) => setSingleWebSku(e.target.value)}
-                      className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900 focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-200"
-                      placeholder="WEB-A525-PBF"
-                    />
-                  </div>
-                </div>
-
-                <div className="rounded-lg border border-gray-200 bg-gray-50 p-3">
-                  <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-600">
-                    Examples
-                  </p>
-                  <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-                    {EXAMPLE_TITLES.map((example) => (
-                      <button
-                        key={example}
-                        type="button"
-                        onClick={() => setSingleTitle(example)}
-                        className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-left text-xs font-medium text-gray-700 transition hover:border-emerald-300 hover:text-gray-900"
-                      >
-                        {example}
-                      </button>
-                    ))}
-                  </div>
+                <div>
+                  <label className="text-xs font-semibold text-gray-600 uppercase tracking-wide">
+                    Product SKU (optional)
+                  </label>
+                  <input
+                    value={singleProductSku}
+                    onChange={(e) => setSingleProductSku(e.target.value)}
+                    className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900 focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-200"
+                    placeholder="A525PBF"
+                  />
                 </div>
               </div>
 
@@ -496,88 +421,62 @@ export default function Dashboard() {
                     {singleAnalysisError}
                   </div>
                 ) : singleAnalysis ? (
-                  <div className="space-y-3">
-                    <div className="rounded-lg border border-gray-200 bg-gray-50 p-3">
-                      <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">Predicted SKU</p>
-                      <p className="mt-1 text-base font-bold text-gray-900">{singleAnalysis.sku || "-"}</p>
-                    </div>
-
-                    <div className="rounded-lg border border-gray-200 p-3">
-                      <div className="mb-2 flex items-center justify-between">
-                        <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">Confidence</p>
-                        <span className={`inline-flex items-center rounded-full border px-2 py-1 text-xs font-semibold ${singleConfidenceUi.badgeClass}`}>
-                          {singleConfidenceUi.label}
+                  <div className="space-y-2.5">
+                    {/* SKU + Confidence row */}
+                    <div className="flex items-center justify-between gap-3 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2">
+                      <div>
+                        <p className="text-[10px] font-semibold uppercase tracking-wide text-gray-400">SKU</p>
+                        <p className="text-sm font-bold text-gray-900">{singleAnalysis.sku || "—"}</p>
+                      </div>
+                      <div className="flex items-center gap-2 shrink-0">
+                        <span className={`text-xs font-semibold px-2 py-0.5 rounded-full border ${singleConfidenceUi.badgeClass}`}>
+                          {singleConfidencePercent}% · {singleConfidenceUi.label}
                         </span>
+                        <div className="w-16 h-1.5 overflow-hidden rounded-full bg-gray-200">
+                          <div className={`h-full rounded-full transition-all ${singleConfidenceUi.barClass}`} style={{ width: `${singleConfidencePercent}%` }} />
+                        </div>
                       </div>
-                      <div className="mb-1.5 h-2 overflow-hidden rounded-full bg-gray-100">
-                        <div
-                          className={`h-full transition-all ${singleConfidenceUi.barClass}`}
-                          style={{ width: `${singleConfidencePercent}%` }}
-                        />
-                      </div>
-                      <p className="text-sm font-semibold text-gray-700">{singleConfidencePercent}%</p>
                     </div>
 
-                    <div className="rounded-lg border border-gray-200 p-3">
-                      <h4 className="text-xs font-semibold uppercase tracking-wide text-gray-500">Parsing Details</h4>
-                      <dl className="mt-2 grid grid-cols-1 gap-2 text-sm sm:grid-cols-2">
-                        <div>
-                          <dt className="text-gray-500">Brand detected</dt>
-                          <dd className="font-semibold text-gray-800">{singleAnalysis.brand || "-"}</dd>
+                    {/* Details grid */}
+                    <div className="grid grid-cols-3 gap-2 text-xs">
+                      {[
+                        { label: "Brand", value: singleAnalysis.brand },
+                        { label: "Model", value: singleAnalysis.model },
+                        { label: "Code", value: singleAnalysis.model_code },
+                        { label: "Part", value: singleAnalysis.part },
+                        { label: "Sub-part", value: singleAnalysis.secondary_part },
+                        { label: "Reason", value: singleAnalysis.parser_reason },
+                      ].map(({ label, value }) => (
+                        <div key={label} className="rounded-md border border-gray-100 bg-gray-50 px-2 py-1.5">
+                          <p className="text-[10px] font-semibold uppercase tracking-wide text-gray-400">{label}</p>
+                          <p className="truncate font-semibold text-gray-800">{value || "—"}</p>
                         </div>
-                        <div>
-                          <dt className="text-gray-500">Model detected</dt>
-                          <dd className="font-semibold text-gray-800">{singleAnalysis.model || "-"}</dd>
-                        </div>
-                        <div>
-                          <dt className="text-gray-500">Model code</dt>
-                          <dd className="font-semibold text-gray-800">{singleAnalysis.model_code || "-"}</dd>
-                        </div>
-                        <div>
-                          <dt className="text-gray-500">Primary component</dt>
-                          <dd className="font-semibold text-gray-800">{singleAnalysis.part || "-"}</dd>
-                        </div>
-                        <div>
-                          <dt className="text-gray-500">Secondary component</dt>
-                          <dd className="font-semibold text-gray-800">{singleAnalysis.secondary_part || "-"}</dd>
-                        </div>
-                        <div>
-                          <dt className="text-gray-500">Parser reason</dt>
-                          <dd className="font-semibold text-gray-800">{singleAnalysis.parser_reason || "-"}</dd>
-                        </div>
-                      </dl>
+                      ))}
                     </div>
 
-                    <div className="rounded-lg border border-gray-200 p-3">
-                      <div className="mb-2 flex items-center gap-2">
-                        <Sparkles className="h-4 w-4 text-gray-500" />
-                        <h4 className="text-xs font-semibold uppercase tracking-wide text-gray-500">Spelling Corrections</h4>
+                    {/* Spelling corrections — only shown when present */}
+                    {singleAnalysis.corrections.length > 0 && (
+                      <div className="flex flex-wrap gap-1.5 pt-0.5">
+                        {singleAnalysis.corrections.map((item, idx) => (
+                          <span
+                            key={idx}
+                            className="inline-flex items-center gap-1 rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-xs font-medium text-amber-800"
+                          >
+                            <span className="font-mono">{item.from}</span>
+                            <span className="text-amber-400">→</span>
+                            <span className="font-mono">{item.to}</span>
+                          </span>
+                        ))}
                       </div>
-                      {singleAnalysis.corrections.length > 0 ? (
-                        <ul className="space-y-2">
-                          {singleAnalysis.corrections.map((item, idx) => (
-                            <li
-                              key={`${item.from}-${item.to}-${idx}`}
-                              className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-xs font-medium text-gray-700"
-                            >
-                              <span className="font-mono text-gray-900">{item.from}</span>
-                              <span className="px-2 text-gray-400">→</span>
-                              <span className="font-mono text-gray-900">{item.to}</span>
-                            </li>
-                          ))}
-                        </ul>
-                      ) : (
-                        <p className="text-sm text-gray-600">No spelling corrections were applied.</p>
-                      )}
-                    </div>
+                    )}
                   </div>
                 ) : (
-                  <div className="rounded-lg border border-gray-200 bg-gray-50 p-3 text-sm text-gray-600">
-                    Start typing in the title input to see live analysis.
-                  </div>
+                  <p className="text-xs text-gray-400">Start typing to see live analysis.</p>
                 )}
               </div>
             </div>
+
 
             {/* Right Card: Bulk Upload & Controls */}
             <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-6 flex flex-col gap-6 h-full">
