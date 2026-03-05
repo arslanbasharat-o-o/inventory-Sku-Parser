@@ -55,6 +55,7 @@ jobs:
           set +e
           npm run build -- --webpack > /tmp/frontend-build-webpack.log 2>&1
           webpack_status=$?
+          echo "Webpack exit code: ${webpack_status}"
           if [ "$webpack_status" -eq 0 ]; then
             cat /tmp/frontend-build-webpack.log
             exit 0
@@ -62,6 +63,7 @@ jobs:
 
           npm run build > /tmp/frontend-build-turbo.log 2>&1
           turbo_status=$?
+          echo "Turbopack exit code: ${turbo_status}"
           if [ "$turbo_status" -eq 0 ]; then
             cat /tmp/frontend-build-turbo.log
             exit 0
@@ -71,6 +73,7 @@ jobs:
           cat /tmp/frontend-build-webpack.log
           echo "Turbopack build failed:"
           cat /tmp/frontend-build-turbo.log
+          echo "::error file=frontend-build::webpack exit code=${webpack_status}, turbopack exit code=${turbo_status}"
 
           while IFS= read -r line; do
             esc="${line//'%'/'%25'}"
