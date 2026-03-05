@@ -140,6 +140,15 @@ def generate_sku_with_confidence(
     )
 
 
+def analyze_title(
+    title: object,
+    product_sku_hint: object = "",
+    product_web_sku_hint: object = "",
+) -> dict[str, object]:
+    _sync_engine_paths_from_globals()
+    return _ENGINE.analyze_title(title, product_sku_hint, product_web_sku_hint)
+
+
 def process_inventory(input_file: str | Path, output_file: str | Path) -> pd.DataFrame:
     _sync_engine_paths_from_globals()
     return _ENGINE.process_inventory(input_file, output_file)
@@ -188,6 +197,7 @@ __all__ = [
     "interpret_title_semantically",
     "generate_sku",
     "generate_sku_with_confidence",
+    "analyze_title",
     "process_inventory",
 ]
 

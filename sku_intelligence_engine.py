@@ -302,6 +302,34 @@ BRAND_FAMILY_MAP = {
     "zte": "ZTE",
 }
 
+MANUFACTURER_LABEL_MAP = {
+    "samsung": "SAMSUNG",
+    "galaxy": "SAMSUNG",
+    "apple": "APPLE",
+    "iphone": "APPLE",
+    "google": "GOOGLE",
+    "pixel": "GOOGLE",
+    "xiaomi": "XIAOMI",
+    "mi": "XIAOMI",
+    "redmi": "XIAOMI",
+    "poco": "XIAOMI",
+    "oneplus": "ONEPLUS",
+    "oppo": "OPPO",
+    "vivo": "VIVO",
+    "realme": "REALME",
+    "huawei": "HUAWEI",
+    "honor": "HONOR",
+    "motorola": "MOTOROLA",
+    "moto": "MOTOROLA",
+    "infinix": "INFINIX",
+    "tecno": "TECNO",
+    "nokia": "NOKIA",
+    "sony": "SONY",
+    "asus": "ASUS",
+    "lenovo": "LENOVO",
+    "zte": "ZTE",
+}
+
 DEFAULT_PART_CODE_RULES: dict[str, str] = {
     "power volume flex": "PV-F",
     "power and volume flex": "PV-F",
@@ -821,26 +849,31 @@ class SKUIntelligenceEngine:
                 candidates.update(self._metaphone_index.get(key, ()))
         return tuple(sorted(candidates))
 
-    def _apply_phrase_corrections(self, normalized_title: str) -> tuple[str, float]:
+    def _apply_phrase_corrections(
+        self,
+        normalized_title: str,
+    ) -> tuple[str, float, tuple[tuple[str, str], ...]]:
         if not normalized_title:
-            return normalized_title, 1.0
+            return normalized_title, 1.0, ()
         phrase_map = {
             typo: canonical
             for typo, canonical in self.spelling_corrections.items()
             if " " in typo
         }
         if not phrase_map:
-            return normalized_title, 1.0
+            return normalized_title, 1.0, ()
 
         corrected = normalized_title
         confidence = 1.0
+        corrections: list[tuple[str, str]] = []
         for typo, canonical in sorted(phrase_map.items(), key=lambda item: len(item[0]), reverse=True):
             pattern = rf"\b{re.escape(typo)}\b"
             if re.search(pattern, corrected):
                 corrected = re.sub(pattern, canonical, corrected)
                 confidence = min(confidence, 0.92)
+                corrections.append((typo, canonical))
         corrected = RE_MULTI_SPACE.sub(" ", corrected).strip()
-        return corrected, confidence
+        return corrected, confidence, tuple(corrections)
 
     @lru_cache(maxsize=50_000)
     def _correct_token_cached(self, token: str) -> tuple[str, float, str]:
@@ -919,7 +952,7 @@ class SKUIntelligenceEngine:
         return token, 0.65, "unchanged"
 
     def _normalize_with_token_corrections(self, normalized_title: str, learn: bool = False) -> str:
-        corrected, _confidence, _method = self._normalize_with_token_corrections_scored(
+        corrected, _confidence, _method, _corrections = self._normalize_with_token_corrections_scored(
             normalized_title,
             learn=learn,
         )
@@ -929,20 +962,25 @@ class SKUIntelligenceEngine:
         self,
         normalized_title: str,
         learn: bool = False,
-    ) -> tuple[str, float, str]:
-        phrase_corrected, phrase_confidence = self._apply_phrase_corrections(normalized_title)
+    ) -> tuple[str, float, str, tuple[tuple[str, str], ...]]:
+        phrase_corrected, phrase_confidence, phrase_corrections = self._apply_phrase_corrections(
+            normalized_title
+        )
         tokens = self.tokenize(phrase_corrected)
         if not tokens:
-            return phrase_corrected, phrase_confidence, "exact"
+            return phrase_corrected, phrase_confidence, "exact", phrase_corrections
 
         corrected_tokens: list[str] = []
         confidences: list[float] = [phrase_confidence]
         methods: list[str] = []
+        token_corrections: list[tuple[str, str]] = list(phrase_corrections)
         for token in tokens:
             corrected_token, token_conf, method = self._correct_token_cached(token)
             corrected_tokens.append(corrected_token)
             confidences.append(token_conf)
             methods.append(method)
+            if corrected_token != token:
+                token_corrections.append((token, corrected_token))
             if learn and corrected_token != token:
                 self._maybe_learn_spelling_variation(token, corrected_token)
 
@@ -961,7 +999,17 @@ class SKUIntelligenceEngine:
             correction_method = "difflib"
         else:
             correction_method = "unchanged"
-        return corrected, min_confidence, correction_method
+        deduped_corrections: list[tuple[str, str]] = []
+        seen_pairs: set[tuple[str, str]] = set()
+        for source, target in token_corrections:
+            pair = (source.strip(), target.strip())
+            if not pair[0] or not pair[1] or pair[0] == pair[1]:
+                continue
+            if pair in seen_pairs:
+                continue
+            seen_pairs.add(pair)
+            deduped_corrections.append(pair)
+        return corrected, min_confidence, correction_method, tuple(deduped_corrections)
 
     def _rebuild_vector_index(self) -> None:
         corpus: dict[str, str] = {}
@@ -1167,7 +1215,7 @@ class SKUIntelligenceEngine:
         self._parse_cached.cache_clear()
 
     def _layer3_fuzzy_interpreter(self, normalized_title: str) -> tuple[str, str, float]:
-        corrected_title, correction_confidence, correction_method = self._normalize_with_token_corrections_scored(
+        corrected_title, correction_confidence, correction_method, _corrections = self._normalize_with_token_corrections_scored(
             normalized_title,
             learn=False,
         )
@@ -1680,7 +1728,7 @@ class SKUIntelligenceEngine:
     ) -> tuple[str, float, str, str, str, str, str, str, str]:
         normalized_title = self.normalize_text(product_name)
         normalized_hint = self.normalize_text(f"{product_sku} {product_web_sku}")
-        corrected_title, correction_confidence, correction_method = self._normalize_with_token_corrections_scored(
+        corrected_title, correction_confidence, correction_method, _corrections = self._normalize_with_token_corrections_scored(
             normalized_title,
             learn=False,
         )
@@ -1802,6 +1850,65 @@ class SKUIntelligenceEngine:
         if parsed.confidence_score < 0.90 and parsed.part_code:
             self._update_unknown_log(name_text, parsed.part_code)
         return parsed
+
+    def _detect_manufacturer_label(self, corrected_title: str) -> str:
+        for token in self.tokenize(corrected_title):
+            label = MANUFACTURER_LABEL_MAP.get(token.lower())
+            if label:
+                return label
+        return ""
+
+    def _split_primary_secondary_part(self, part_code: str) -> tuple[str, str]:
+        normalized = self._canonicalize_part_code(part_code)
+        if not normalized:
+            return "", ""
+        tokens = normalized.split()
+        if not tokens:
+            return "", ""
+        primary = tokens[0]
+        secondary = " ".join(tokens[1:]).strip()
+        return primary, secondary
+
+    def analyze_title(
+        self,
+        title: object,
+        product_sku: object = "",
+        product_web_sku: object = "",
+    ) -> dict[str, object]:
+        title_text = str(title or "")
+        parsed = self.parse_title(title_text, product_sku, product_web_sku)
+
+        normalized = self.normalize_text(title_text)
+        corrected_title, _corr_conf, _corr_method, corrections = self._normalize_with_token_corrections_scored(
+            normalized,
+            learn=False,
+        )
+
+        primary_part, secondary_part = self._split_primary_secondary_part(parsed.part_code)
+        model_component = " ".join(token for token in (parsed.brand, parsed.model) if token).strip()
+        manufacturer = self._detect_manufacturer_label(corrected_title)
+        if not manufacturer and parsed.brand:
+            manufacturer = MANUFACTURER_LABEL_MAP.get(parsed.brand.lower(), parsed.brand)
+
+        return {
+            "title": title_text,
+            "normalized_title": normalized,
+            "interpreted_title": corrected_title,
+            "brand": manufacturer,
+            "model": model_component,
+            "model_code": parsed.model_code,
+            "part": primary_part,
+            "secondary_part": secondary_part,
+            "sku": parsed.suggested_sku,
+            "confidence": float(parsed.confidence_score),
+            "decision": parsed.decision,
+            "reason": parsed.parser_reason,
+            "corrections": [
+                {"from": source, "to": target}
+                for source, target in corrections
+            ],
+            "parse_status": "parsed" if parsed.suggested_sku != NOT_UNDERSTANDABLE else "not_understandable",
+        }
 
     def semantic_part_detection(self, title: object) -> str:
         result = self.parse_title(title)
