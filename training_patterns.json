@@ -1,49 +1,1781 @@
 {
-  "generated_at": "2026-03-05T20:17:50.809859+00:00",
-  "rows_total": 3,
-  "rows_parsed": 3,
+  "generated_at": "2026-03-05T21:50:30.935378+00:00",
+  "rows_total": 1584,
+  "rows_parsed": 1342,
   "ngram_frequency_threshold": 5,
   "pattern_ngram_range": [
     2,
     4
   ],
-  "frequent_phrase_candidates": 0,
+  "frequent_phrase_candidates": 283,
   "common_title_patterns": [
     {
-      "pattern": "button flex",
-      "count": 2,
+      "pattern": "sim card",
+      "count": 214,
+      "top_code": "ST"
+    },
+    {
+      "pattern": "camera lens",
+      "count": 180,
+      "top_code": "BCL"
+    },
+    {
+      "pattern": "card tray",
+      "count": 175,
+      "top_code": "ST"
+    },
+    {
+      "pattern": "sim card tray",
+      "count": 175,
+      "top_code": "ST"
+    },
+    {
+      "pattern": "frame refurbished",
+      "count": 169,
+      "top_code": "LCD"
+    },
+    {
+      "pattern": "lcd frame",
+      "count": 161,
+      "top_code": ""
+    },
+    {
+      "pattern": "flex cable",
+      "count": 149,
+      "top_code": "MFC"
+    },
+    {
+      "pattern": "back camera",
+      "count": 139,
+      "top_code": "BC"
+    },
+    {
+      "pattern": "all colors",
+      "count": 112,
+      "top_code": "BCL"
+    },
+    {
+      "pattern": "door steel",
+      "count": 107,
+      "top_code": "BACK"
+    },
+    {
+      "pattern": "door steel plate camera",
+      "count": 107,
+      "top_code": "BACK"
+    },
+    {
+      "pattern": "back door",
+      "count": 107,
+      "top_code": "BACK DOOR"
+    },
+    {
+      "pattern": "camera lens no logo",
+      "count": 107,
+      "top_code": "BCL"
+    },
+    {
+      "pattern": "no logo",
+      "count": 107,
+      "top_code": "BACK"
+    },
+    {
+      "pattern": "back door steel",
+      "count": 107,
+      "top_code": "BACK DOOR"
+    },
+    {
+      "pattern": "back door steel plate",
+      "count": 107,
+      "top_code": "BACK DOOR"
+    },
+    {
+      "pattern": "plate camera lens",
+      "count": 107,
+      "top_code": "BCL"
+    },
+    {
+      "pattern": "camera lens no",
+      "count": 107,
+      "top_code": "BCL"
+    },
+    {
+      "pattern": "lens no logo",
+      "count": 107,
+      "top_code": "BACK"
+    },
+    {
+      "pattern": "steel plate camera lens",
+      "count": 107,
+      "top_code": "BCL"
+    },
+    {
+      "pattern": "steel plate camera",
+      "count": 107,
+      "top_code": "BACK"
+    },
+    {
+      "pattern": "lens no",
+      "count": 107,
+      "top_code": "BACK"
+    },
+    {
+      "pattern": "door steel plate",
+      "count": 107,
+      "top_code": "BACK"
+    },
+    {
+      "pattern": "steel plate",
+      "count": 107,
+      "top_code": "BACK"
+    },
+    {
+      "pattern": "plate camera lens no",
+      "count": 107,
+      "top_code": "BCL"
+    },
+    {
+      "pattern": "plate camera",
+      "count": 107,
+      "top_code": "BACK"
+    },
+    {
+      "pattern": "lcd frame refurbished",
+      "count": 105,
+      "top_code": ""
+    },
+    {
+      "pattern": "charging port",
+      "count": 84,
+      "top_code": "CP"
+    },
+    {
+      "pattern": "refurbished all",
+      "count": 84,
+      "top_code": "LCD"
+    },
+    {
+      "pattern": "refurbished all colors",
+      "count": 84,
+      "top_code": "LCD"
+    },
+    {
+      "pattern": "frame refurbished all",
+      "count": 82,
+      "top_code": "LCD"
+    },
+    {
+      "pattern": "frame refurbished all colors",
+      "count": 82,
+      "top_code": "LCD"
+    },
+    {
+      "pattern": "earpiece speaker",
+      "count": 80,
+      "top_code": "ES"
+    },
+    {
+      "pattern": "back camera lens",
+      "count": 73,
+      "top_code": "BCL"
+    },
+    {
+      "pattern": "loud speaker",
+      "count": 72,
+      "top_code": "LS"
+    },
+    {
+      "pattern": "oled frame",
+      "count": 68,
+      "top_code": "LCD"
+    },
+    {
+      "pattern": "tempered glass",
+      "count": 68,
+      "top_code": "TEMP"
+    },
+    {
+      "pattern": "lcd frame refurbished all",
+      "count": 64,
+      "top_code": ""
+    },
+    {
+      "pattern": "front camera",
+      "count": 61,
+      "top_code": "FC"
+    },
+    {
+      "pattern": "headphone jack",
+      "count": 59,
+      "top_code": "HJ"
+    },
+    {
+      "pattern": "volume flex",
+      "count": 57,
+      "top_code": "VOL-F"
+    },
+    {
+      "pattern": "power volume",
+      "count": 56,
       "top_code": "P/V-F"
     },
     {
+      "pattern": "oled frame refurbished",
+      "count": 54,
+      "top_code": ""
+    },
+    {
+      "pattern": "charging port board",
+      "count": 52,
+      "top_code": "CP"
+    },
+    {
+      "pattern": "port board",
+      "count": 52,
+      "top_code": "CP HJ"
+    },
+    {
+      "pattern": "premium battery",
+      "count": 52,
+      "top_code": "BATT"
+    },
+    {
+      "pattern": "antenna connecting",
+      "count": 51,
+      "top_code": "ANT CON"
+    },
+    {
+      "pattern": "no logo black",
+      "count": 51,
+      "top_code": "BACK"
+    },
+    {
+      "pattern": "logo black",
+      "count": 51,
+      "top_code": "BACK"
+    },
+    {
+      "pattern": "lens no logo black",
+      "count": 51,
+      "top_code": "BACK"
+    },
+    {
+      "pattern": "antenna connecting cable",
+      "count": 49,
+      "top_code": "ANT CON"
+    },
+    {
+      "pattern": "connecting cable",
+      "count": 49,
+      "top_code": "ANT CON"
+    },
+    {
+      "pattern": "power volume flex",
+      "count": 48,
+      "top_code": "PV-F"
+    },
+    {
+      "pattern": "fingerprint reader",
+      "count": 48,
+      "top_code": "FR"
+    },
+    {
+      "pattern": "reader flex",
+      "count": 48,
+      "top_code": "FR"
+    },
+    {
+      "pattern": "fingerprint reader flex",
+      "count": 48,
+      "top_code": "FR"
+    },
+    {
+      "pattern": "mainboard flex",
+      "count": 47,
+      "top_code": "MFC"
+    },
+    {
+      "pattern": "fpc connector",
+      "count": 45,
+      "top_code": "FPC"
+    },
+    {
+      "pattern": "tray black",
+      "count": 45,
+      "top_code": "ST"
+    },
+    {
+      "pattern": "fingerprint reader flex cable",
+      "count": 43,
+      "top_code": "FR"
+    },
+    {
+      "pattern": "reader flex cable",
+      "count": 43,
+      "top_code": "FR"
+    },
+    {
+      "pattern": "sim card tray black",
+      "count": 42,
+      "top_code": "ST"
+    },
+    {
+      "pattern": "card tray black",
+      "count": 42,
+      "top_code": "ST"
+    },
+    {
+      "pattern": "frame incell",
+      "count": 42,
+      "top_code": ""
+    },
+    {
+      "pattern": "lcd frame incell",
+      "count": 40,
+      "top_code": ""
+    },
+    {
+      "pattern": "fingerprint sensor",
+      "count": 39,
+      "top_code": "FS"
+    },
+    {
+      "pattern": "card reader",
+      "count": 39,
+      "top_code": "SC-R"
+    },
+    {
+      "pattern": "sim card reader",
+      "count": 39,
+      "top_code": "SC-R"
+    },
+    {
+      "pattern": "refurbished black",
+      "count": 36,
+      "top_code": "LCD"
+    },
+    {
+      "pattern": "frame refurbished black",
+      "count": 36,
+      "top_code": "LCD"
+    },
+    {
+      "pattern": "sensor flex",
+      "count": 35,
+      "top_code": "TEMP"
+    },
+    {
+      "pattern": "mainboard flex cable",
+      "count": 35,
+      "top_code": "MFC"
+    },
+    {
+      "pattern": "camera set",
+      "count": 34,
+      "top_code": "BC"
+    },
+    {
+      "pattern": "back camera set",
+      "count": 34,
+      "top_code": "BC"
+    },
+    {
+      "pattern": "fingerprint sensor flex",
+      "count": 29,
+      "top_code": "FS"
+    },
+    {
+      "pattern": "single sim",
+      "count": 28,
+      "top_code": "ST"
+    },
+    {
+      "pattern": "prism crush",
+      "count": 27,
+      "top_code": ""
+    },
+    {
+      "pattern": "tray prism",
+      "count": 26,
+      "top_code": "ST"
+    },
+    {
+      "pattern": "card tray prism",
+      "count": 25,
+      "top_code": "ST"
+    },
+    {
+      "pattern": "sim card tray prism",
+      "count": 25,
+      "top_code": "ST"
+    },
+    {
+      "pattern": "single sim card",
+      "count": 24,
+      "top_code": "ST"
+    },
+    {
+      "pattern": "single sim card tray",
+      "count": 24,
+      "top_code": "ST"
+    },
+    {
+      "pattern": "frame incell all",
+      "count": 23,
+      "top_code": ""
+    },
+    {
+      "pattern": "incell all",
+      "count": 23,
+      "top_code": ""
+    },
+    {
+      "pattern": "incell all colors",
+      "count": 23,
+      "top_code": ""
+    },
+    {
+      "pattern": "frame incell all colors",
+      "count": 23,
+      "top_code": ""
+    },
+    {
+      "pattern": "tray awesome",
+      "count": 23,
+      "top_code": "ST"
+    },
+    {
+      "pattern": "sim card tray awesome",
+      "count": 23,
+      "top_code": "ST"
+    },
+    {
+      "pattern": "card tray awesome",
+      "count": 23,
+      "top_code": "ST"
+    },
+    {
+      "pattern": "button flex",
+      "count": 22,
+      "top_code": "P/V-F"
+    },
+    {
+      "pattern": "lcd frame incell all",
+      "count": 22,
+      "top_code": ""
+    },
+    {
+      "pattern": "lcd frame refurbished black",
+      "count": 22,
+      "top_code": ""
+    },
+    {
+      "pattern": "volume flex cable",
+      "count": 21,
+      "top_code": "VOL-F"
+    },
+    {
+      "pattern": "battery fpc",
+      "count": 20,
+      "top_code": "BATT FPC"
+    },
+    {
+      "pattern": "battery fpc connector",
+      "count": 20,
+      "top_code": "BATT FPC"
+    },
+    {
+      "pattern": "dual sim",
+      "count": 20,
+      "top_code": "STD"
+    },
+    {
+      "pattern": "awesome black",
+      "count": 20,
+      "top_code": ""
+    },
+    {
+      "pattern": "us version",
+      "count": 19,
+      "top_code": ""
+    },
+    {
+      "pattern": "charging port headphone jack",
+      "count": 19,
+      "top_code": "CP HJ"
+    },
+    {
+      "pattern": "charging port headphone",
+      "count": 19,
+      "top_code": "CP HJ"
+    },
+    {
+      "pattern": "port headphone jack",
+      "count": 19,
+      "top_code": "CP HJ"
+    },
+    {
+      "pattern": "port headphone",
+      "count": 19,
+      "top_code": "CP HJ"
+    },
+    {
+      "pattern": "power volume flex cable",
+      "count": 18,
+      "top_code": "PV-F"
+    },
+    {
+      "pattern": "dual sim card",
+      "count": 18,
+      "top_code": "STD"
+    },
+    {
+      "pattern": "dual sim card tray",
+      "count": 18,
+      "top_code": "STD"
+    },
+    {
+      "pattern": "cable black",
+      "count": 17,
+      "top_code": "FR"
+    },
+    {
+      "pattern": "flex cable black",
+      "count": 16,
+      "top_code": "FR"
+    },
+    {
+      "pattern": "lcd fpc",
+      "count": 16,
+      "top_code": "FPC"
+    },
+    {
+      "pattern": "lcd fpc connector",
+      "count": 16,
+      "top_code": "FPC"
+    },
+    {
+      "pattern": "reader flex cable black",
+      "count": 15,
+      "top_code": "FR"
+    },
+    {
+      "pattern": "incell black",
+      "count": 15,
+      "top_code": ""
+    },
+    {
+      "pattern": "frame incell black",
+      "count": 15,
+      "top_code": ""
+    },
+    {
+      "pattern": "volume button flex",
+      "count": 14,
+      "top_code": "VOL-F"
+    },
+    {
+      "pattern": "volume button",
+      "count": 14,
+      "top_code": "P/V-F"
+    },
+    {
+      "pattern": "button flex cable",
+      "count": 14,
+      "top_code": ""
+    },
+    {
+      "pattern": "oled frame refurbished all",
+      "count": 14,
+      "top_code": ""
+    },
+    {
+      "pattern": "lcd frame incell black",
+      "count": 14,
+      "top_code": ""
+    },
+    {
+      "pattern": "tray prism crush",
+      "count": 14,
+      "top_code": "ST"
+    },
+    {
+      "pattern": "card tray prism crush",
+      "count": 14,
+      "top_code": "ST"
+    },
+    {
+      "pattern": "lens no logo prism",
+      "count": 14,
+      "top_code": "BACK"
+    },
+    {
+      "pattern": "no logo prism",
+      "count": 14,
+      "top_code": "BACK"
+    },
+    {
+      "pattern": "logo prism",
+      "count": 14,
+      "top_code": "BACK"
+    },
+    {
+      "pattern": "tray blue",
+      "count": 13,
+      "top_code": "ST"
+    },
+    {
+      "pattern": "card tray blue",
+      "count": 13,
+      "top_code": "ST"
+    },
+    {
+      "pattern": "sim card tray blue",
+      "count": 13,
+      "top_code": "ST"
+    },
+    {
+      "pattern": "oled frame refurbished black",
+      "count": 13,
+      "top_code": ""
+    },
+    {
+      "pattern": "board headphone",
+      "count": 12,
+      "top_code": "CP HJ"
+    },
+    {
+      "pattern": "board headphone jack",
+      "count": 12,
+      "top_code": "CP HJ"
+    },
+    {
+      "pattern": "charging port board headphone",
+      "count": 12,
+      "top_code": "CP HJ"
+    },
+    {
+      "pattern": "port board headphone jack",
+      "count": 12,
+      "top_code": "CP HJ"
+    },
+    {
+      "pattern": "port board headphone",
+      "count": 12,
+      "top_code": "CP HJ"
+    },
+    {
+      "pattern": "sim card tray red",
+      "count": 12,
+      "top_code": "ST"
+    },
+    {
+      "pattern": "card tray red",
+      "count": 12,
+      "top_code": "ST"
+    },
+    {
+      "pattern": "tray red",
+      "count": 12,
+      "top_code": "ST"
+    },
+    {
+      "pattern": "charging flex",
+      "count": 12,
+      "top_code": "CF"
+    },
+    {
+      "pattern": "no logo prism crush",
+      "count": 12,
+      "top_code": "BACK"
+    },
+    {
+      "pattern": "logo prism crush",
+      "count": 12,
+      "top_code": "BACK"
+    },
+    {
+      "pattern": "volume button flex cable",
+      "count": 11,
+      "top_code": "VOL-F"
+    },
+    {
+      "pattern": "lcd flex cable",
+      "count": 11,
+      "top_code": "CF"
+    },
+    {
+      "pattern": "lcd flex",
+      "count": 11,
+      "top_code": "CF"
+    },
+    {
+      "pattern": "sensor flex cable",
+      "count": 11,
+      "top_code": ""
+    },
+    {
+      "pattern": "international version",
+      "count": 11,
+      "top_code": ""
+    },
+    {
+      "pattern": "power flex",
+      "count": 10,
+      "top_code": "P/V-F"
+    },
+    {
+      "pattern": "logo blue",
+      "count": 10,
+      "top_code": "BACK"
+    },
+    {
+      "pattern": "lens no logo blue",
+      "count": 10,
+      "top_code": "BACK"
+    },
+    {
+      "pattern": "no logo blue",
+      "count": 10,
+      "top_code": "BACK"
+    },
+    {
+      "pattern": "crush black",
+      "count": 10,
+      "top_code": ""
+    },
+    {
+      "pattern": "prism crush black",
+      "count": 10,
+      "top_code": ""
+    },
+    {
+      "pattern": "card tray white",
+      "count": 10,
+      "top_code": "ST"
+    },
+    {
+      "pattern": "sim card tray white",
+      "count": 10,
+      "top_code": "ST"
+    },
+    {
+      "pattern": "tray white",
+      "count": 10,
+      "top_code": "ST"
+    },
+    {
+      "pattern": "colors us version",
+      "count": 10,
+      "top_code": ""
+    },
+    {
+      "pattern": "all colors us",
+      "count": 10,
+      "top_code": ""
+    },
+    {
+      "pattern": "colors us",
+      "count": 10,
+      "top_code": ""
+    },
+    {
+      "pattern": "all colors us version",
+      "count": 10,
+      "top_code": ""
+    },
+    {
+      "pattern": "charging port pcb board",
+      "count": 9,
+      "top_code": "CP"
+    },
+    {
+      "pattern": "pcb board",
+      "count": 9,
+      "top_code": "CP"
+    },
+    {
+      "pattern": "charging port pcb",
+      "count": 9,
+      "top_code": "CP"
+    },
+    {
+      "pattern": "port pcb board",
+      "count": 9,
+      "top_code": "CP"
+    },
+    {
+      "pattern": "port pcb",
+      "count": 9,
+      "top_code": "CP"
+    },
+    {
+      "pattern": "connector on the",
+      "count": 9,
+      "top_code": "BATT"
+    },
+    {
+      "pattern": "fpc connector on",
+      "count": 9,
+      "top_code": "FPC"
+    },
+    {
+      "pattern": "battery fpc connector on",
+      "count": 9,
+      "top_code": "BATT FPC"
+    },
+    {
+      "pattern": "connector on the motherboard",
+      "count": 9,
+      "top_code": "BATT"
+    },
+    {
+      "pattern": "fpc connector on the",
+      "count": 9,
+      "top_code": "FPC"
+    },
+    {
+      "pattern": "on the",
+      "count": 9,
+      "top_code": "BATT"
+    },
+    {
+      "pattern": "connector on",
+      "count": 9,
+      "top_code": "BATT"
+    },
+    {
+      "pattern": "the motherboard",
+      "count": 9,
+      "top_code": "BATT"
+    },
+    {
+      "pattern": "on the motherboard",
+      "count": 9,
+      "top_code": "BATT"
+    },
+    {
+      "pattern": "prism cube",
+      "count": 9,
+      "top_code": "ST"
+    },
+    {
+      "pattern": "frame service",
+      "count": 9,
+      "top_code": "LCD"
+    },
+    {
+      "pattern": "frame service pack",
+      "count": 9,
+      "top_code": "LCD"
+    },
+    {
+      "pattern": "service pack",
+      "count": 9,
+      "top_code": "LCD"
+    },
+    {
+      "pattern": "refurbished all colors us",
+      "count": 9,
+      "top_code": ""
+    },
+    {
+      "pattern": "proximity sensor",
+      "count": 8,
+      "top_code": "PS"
+    },
+    {
       "pattern": "power button flex",
-      "count": 2,
+      "count": 8,
       "top_code": "PB-F"
     },
     {
       "pattern": "power button",
-      "count": 2,
+      "count": 8,
       "top_code": "P/V-F"
     },
     {
-      "pattern": "charging port",
-      "count": 1,
+      "pattern": "connector pin",
+      "count": 8,
+      "top_code": "FPC"
+    },
+    {
+      "pattern": "fpc connector pin",
+      "count": 8,
+      "top_code": "FPC"
+    },
+    {
+      "pattern": "logo white",
+      "count": 8,
+      "top_code": "BACK"
+    },
+    {
+      "pattern": "lens no logo white",
+      "count": 8,
+      "top_code": "BACK"
+    },
+    {
+      "pattern": "no logo white",
+      "count": 8,
+      "top_code": "BACK"
+    },
+    {
+      "pattern": "frame refurbished gold",
+      "count": 8,
+      "top_code": ""
+    },
+    {
+      "pattern": "refurbished gold",
+      "count": 8,
+      "top_code": ""
+    },
+    {
+      "pattern": "lcd frame service pack",
+      "count": 8,
+      "top_code": ""
+    },
+    {
+      "pattern": "lcd frame service",
+      "count": 8,
+      "top_code": ""
+    },
+    {
+      "pattern": "refurbished white",
+      "count": 8,
+      "top_code": ""
+    },
+    {
+      "pattern": "frame refurbished white",
+      "count": 8,
+      "top_code": ""
+    },
+    {
+      "pattern": "power volume button",
+      "count": 7,
+      "top_code": "P/V-F"
+    },
+    {
+      "pattern": "power volume button flex",
+      "count": 7,
+      "top_code": "P/V-F"
+    },
+    {
+      "pattern": "flex fpc",
+      "count": 7,
+      "top_code": "MFC FPC"
+    },
+    {
+      "pattern": "flex fpc connector",
+      "count": 7,
+      "top_code": "MFC FPC"
+    },
+    {
+      "pattern": "board us",
+      "count": 7,
       "top_code": "CP"
+    },
+    {
+      "pattern": "charging port board us",
+      "count": 7,
+      "top_code": "CP"
+    },
+    {
+      "pattern": "port board us",
+      "count": 7,
+      "top_code": "CP"
+    },
+    {
+      "pattern": "board us version",
+      "count": 7,
+      "top_code": "CP"
+    },
+    {
+      "pattern": "port board us version",
+      "count": 7,
+      "top_code": "CP"
+    },
+    {
+      "pattern": "cable white",
+      "count": 7,
+      "top_code": "FR"
+    },
+    {
+      "pattern": "flex cable white",
+      "count": 7,
+      "top_code": "FR"
+    },
+    {
+      "pattern": "reader flex cable white",
+      "count": 7,
+      "top_code": "FR"
     }
   ],
   "common_part_abbreviations": [
     {
-      "code": "PB-F",
-      "count": 2
+      "code": "ST",
+      "count": 161
+    },
+    {
+      "code": "BACK DOOR BCL",
+      "count": 105
+    },
+    {
+      "code": "ES",
+      "count": 81
+    },
+    {
+      "code": "LS",
+      "count": 71
+    },
+    {
+      "code": "BCL",
+      "count": 70
+    },
+    {
+      "code": "TEMP",
+      "count": 68
+    },
+    {
+      "code": "BC",
+      "count": 66
+    },
+    {
+      "code": "FC",
+      "count": 61
+    },
+    {
+      "code": "VIB",
+      "count": 60
+    },
+    {
+      "code": "PV-F",
+      "count": 55
+    },
+    {
+      "code": "ANT CON",
+      "count": 54
+    },
+    {
+      "code": "BATT",
+      "count": 52
     },
     {
       "code": "CP",
+      "count": 50
+    },
+    {
+      "code": "MFC",
+      "count": 44
+    },
+    {
+      "code": "FR MFC",
+      "count": 40
+    },
+    {
+      "code": "SC-R",
+      "count": 39
+    },
+    {
+      "code": "FS",
+      "count": 37
+    },
+    {
+      "code": "CP HJ",
+      "count": 31
+    },
+    {
+      "code": "HJ",
+      "count": 27
+    },
+    {
+      "code": "BATT FPC",
+      "count": 20
+    },
+    {
+      "code": "STD",
+      "count": 18
+    },
+    {
+      "code": "FPC",
+      "count": 17
+    },
+    {
+      "code": "VOL-F",
+      "count": 16
+    },
+    {
+      "code": "CF",
+      "count": 15
+    },
+    {
+      "code": "FR",
+      "count": 15
+    },
+    {
+      "code": "P-F",
+      "count": 9
+    },
+    {
+      "code": "PB-F",
+      "count": 8
+    },
+    {
+      "code": "NFC CF",
+      "count": 7
+    },
+    {
+      "code": "FPC MFC",
+      "count": 6
+    },
+    {
+      "code": "PS",
+      "count": 6
+    },
+    {
+      "code": "WIF-ANNT",
+      "count": 4
+    },
+    {
+      "code": "BCL P-F",
+      "count": 3
+    },
+    {
+      "code": "BACK DOOR",
+      "count": 3
+    },
+    {
+      "code": "ES VIB",
+      "count": 2
+    },
+    {
+      "code": "FS MFC",
+      "count": 2
+    },
+    {
+      "code": "LCD FPC",
+      "count": 2
+    },
+    {
+      "code": "FR MFC TEMP",
+      "count": 2
+    },
+    {
+      "code": "ES PS",
+      "count": 1
+    },
+    {
+      "code": "CF HJ",
+      "count": 1
+    },
+    {
+      "code": "LIFT-MOT",
+      "count": 1
+    },
+    {
+      "code": "ES-PS",
+      "count": 1
+    },
+    {
+      "code": "P-F FPC",
+      "count": 1
+    },
+    {
+      "code": "CP SC-R-PCB-SR",
+      "count": 1
+    },
+    {
+      "code": "MIC-FC",
+      "count": 1
+    },
+    {
+      "code": "CAM-F",
+      "count": 1
+    },
+    {
+      "code": "P/V-F",
+      "count": 1
+    },
+    {
+      "code": "ANT",
+      "count": 1
+    },
+    {
+      "code": "ST BACK DOOR BCL",
+      "count": 1
+    },
+    {
+      "code": "ST FR MFC",
+      "count": 1
+    },
+    {
+      "code": "CF FPC",
+      "count": 1
+    },
+    {
+      "code": "LS MFC",
       "count": 1
     }
   ],
   "model_detection_patterns": [
     {
+      "model_code": "A205",
+      "count": 31
+    },
+    {
+      "model_code": "A715",
+      "count": 29
+    },
+    {
+      "model_code": "A305",
+      "count": 28
+    },
+    {
+      "model_code": "A505",
+      "count": 27
+    },
+    {
+      "model_code": "A115",
+      "count": 27
+    },
+    {
+      "model_code": "A515",
+      "count": 26
+    },
+    {
+      "model_code": "A405",
+      "count": 26
+    },
+    {
+      "model_code": "A326",
+      "count": 25
+    },
+    {
+      "model_code": "A125",
+      "count": 25
+    },
+    {
+      "model_code": "A426",
+      "count": 24
+    },
+    {
+      "model_code": "A105",
+      "count": 24
+    },
+    {
+      "model_code": "A136",
+      "count": 24
+    },
+    {
+      "model_code": "A217",
+      "count": 24
+    },
+    {
+      "model_code": "A716",
+      "count": 24
+    },
+    {
+      "model_code": "A705",
+      "count": 23
+    },
+    {
+      "model_code": "A415",
+      "count": 23
+    },
+    {
+      "model_code": "A325",
+      "count": 23
+    },
+    {
+      "model_code": "A526",
+      "count": 23
+    },
+    {
+      "model_code": "A516",
+      "count": 23
+    },
+    {
+      "model_code": "A336",
+      "count": 23
+    },
+    {
+      "model_code": "A015",
+      "count": 23
+    },
+    {
+      "model_code": "A207",
+      "count": 23
+    },
+    {
+      "model_code": "A546",
+      "count": 22
+    },
+    {
+      "model_code": "A135",
+      "count": 22
+    },
+    {
+      "model_code": "A225",
+      "count": 22
+    },
+    {
+      "model_code": "A805",
+      "count": 22
+    },
+    {
+      "model_code": "A315",
+      "count": 21
+    },
+    {
+      "model_code": "A037",
+      "count": 21
+    },
+    {
+      "model_code": "A107",
+      "count": 21
+    },
+    {
+      "model_code": "A215",
+      "count": 21
+    },
+    {
+      "model_code": "A226",
+      "count": 21
+    },
+    {
+      "model_code": "A507",
+      "count": 20
+    },
+    {
       "model_code": "A525",
+      "count": 20
+    },
+    {
+      "model_code": "A346",
+      "count": 20
+    },
+    {
+      "model_code": "A146",
+      "count": 20
+    },
+    {
+      "model_code": "A536B",
+      "count": 19
+    },
+    {
+      "model_code": "A356",
+      "count": 19
+    },
+    {
+      "model_code": "A256",
+      "count": 19
+    },
+    {
+      "model_code": "A025",
+      "count": 19
+    },
+    {
+      "model_code": "A057",
+      "count": 19
+    },
+    {
+      "model_code": "A725",
+      "count": 18
+    },
+    {
+      "model_code": "A166",
+      "count": 18
+    },
+    {
+      "model_code": "A606",
+      "count": 18
+    },
+    {
+      "model_code": "A556",
+      "count": 18
+    },
+    {
+      "model_code": "A528",
+      "count": 18
+    },
+    {
+      "model_code": "A307",
+      "count": 18
+    },
+    {
+      "model_code": "A155",
+      "count": 18
+    },
+    {
+      "model_code": "A202",
+      "count": 18
+    },
+    {
+      "model_code": "A022",
+      "count": 17
+    },
+    {
+      "model_code": "A102",
+      "count": 17
+    },
+    {
+      "model_code": "A156",
+      "count": 17
+    },
+    {
+      "model_code": "A065",
+      "count": 16
+    },
+    {
+      "model_code": "A908",
+      "count": 16
+    },
+    {
+      "model_code": "A236",
+      "count": 15
+    },
+    {
+      "model_code": "A055",
+      "count": 15
+    },
+    {
+      "model_code": "A032",
+      "count": 14
+    },
+    {
+      "model_code": "A266",
+      "count": 14
+    },
+    {
+      "model_code": "A235",
+      "count": 14
+    },
+    {
+      "model_code": "A17",
+      "count": 14
+    },
+    {
+      "model_code": "A520",
+      "count": 13
+    },
+    {
+      "model_code": "A035",
+      "count": 13
+    },
+    {
+      "model_code": "A145",
+      "count": 13
+    },
+    {
+      "model_code": "A736",
+      "count": 13
+    },
+    {
+      "model_code": "A366",
+      "count": 13
+    },
+    {
+      "model_code": "A566",
+      "count": 12
+    },
+    {
+      "model_code": "A013",
+      "count": 12
+    },
+    {
+      "model_code": "A047",
+      "count": 12
+    },
+    {
+      "model_code": "A042",
+      "count": 11
+    },
+    {
+      "model_code": "A045",
+      "count": 11
+    },
+    {
+      "model_code": "A137",
+      "count": 11
+    },
+    {
+      "model_code": "A165",
+      "count": 10
+    },
+    {
+      "model_code": "A245",
+      "count": 10
+    },
+    {
+      "model_code": "A320",
+      "count": 9
+    },
+    {
+      "model_code": "A920",
+      "count": 9
+    },
+    {
+      "model_code": "A720",
+      "count": 8
+    },
+    {
+      "model_code": "A127",
+      "count": 8
+    },
+    {
+      "model_code": "A710",
+      "count": 7
+    },
+    {
+      "model_code": "A605",
+      "count": 7
+    },
+    {
+      "model_code": "A600",
+      "count": 7
+    },
+    {
+      "model_code": "A730",
+      "count": 7
+    },
+    {
+      "model_code": "A037U",
+      "count": 6
+    },
+    {
+      "model_code": "A530",
+      "count": 6
+    },
+    {
+      "model_code": "A910",
+      "count": 6
+    },
+    {
+      "model_code": "A407",
+      "count": 6
+    },
+    {
+      "model_code": "A310",
+      "count": 5
+    },
+    {
+      "model_code": "A810",
+      "count": 5
+    },
+    {
+      "model_code": "A500",
+      "count": 5
+    },
+    {
+      "model_code": "A700",
+      "count": 5
+    },
+    {
+      "model_code": "A300",
+      "count": 5
+    },
+    {
+      "model_code": "A075",
+      "count": 5
+    },
+    {
+      "model_code": "A750",
+      "count": 4
+    },
+    {
+      "model_code": "A037F",
+      "count": 4
+    },
+    {
+      "model_code": "A900",
+      "count": 4
+    },
+    {
+      "model_code": "A735",
+      "count": 4
+    },
+    {
+      "model_code": "A260",
+      "count": 4
+    },
+    {
+      "model_code": "A510",
+      "count": 4
+    },
+    {
+      "model_code": "A536",
+      "count": 4
+    },
+    {
+      "model_code": "A066",
       "count": 3
+    },
+    {
+      "model_code": "A145P",
+      "count": 3
+    },
+    {
+      "model_code": "A716U",
+      "count": 3
+    },
+    {
+      "model_code": "A32",
+      "count": 3
+    },
+    {
+      "model_code": "A037M",
+      "count": 2
+    },
+    {
+      "model_code": "A145F",
+      "count": 2
+    },
+    {
+      "model_code": "G887",
+      "count": 2
+    },
+    {
+      "model_code": "A23",
+      "count": 2
+    },
+    {
+      "model_code": "A12",
+      "count": 2
+    },
+    {
+      "model_code": "A15",
+      "count": 2
+    },
+    {
+      "model_code": "A166B",
+      "count": 1
+    },
+    {
+      "model_code": "A166P",
+      "count": 1
+    },
+    {
+      "model_code": "A025F",
+      "count": 1
+    },
+    {
+      "model_code": "A025N",
+      "count": 1
+    },
+    {
+      "model_code": "A145B",
+      "count": 1
+    },
+    {
+      "model_code": "A146U",
+      "count": 1
+    },
+    {
+      "model_code": "A146F",
+      "count": 1
+    },
+    {
+      "model_code": "A716B",
+      "count": 1
+    },
+    {
+      "model_code": "A716V",
+      "count": 1
+    },
+    {
+      "model_code": "A56",
+      "count": 1
+    },
+    {
+      "model_code": "A516N",
+      "count": 1
+    },
+    {
+      "model_code": "A516U",
+      "count": 1
+    },
+    {
+      "model_code": "A10S",
+      "count": 1
+    },
+    {
+      "model_code": "A10",
+      "count": 1
+    },
+    {
+      "model_code": "A21S",
+      "count": 1
+    },
+    {
+      "model_code": "J320",
+      "count": 1
+    },
+    {
+      "model_code": "A02S",
+      "count": 1
+    },
+    {
+      "model_code": "A8S",
+      "count": 1
+    },
+    {
+      "model_code": "A10E",
+      "count": 1
+    },
+    {
+      "model_code": "A04S",
+      "count": 1
+    },
+    {
+      "model_code": "A04E",
+      "count": 1
+    },
+    {
+      "model_code": "A22",
+      "count": 1
+    },
+    {
+      "model_code": "A30S",
+      "count": 1
+    },
+    {
+      "model_code": "A25",
+      "count": 1
+    },
+    {
+      "model_code": "A52S",
+      "count": 1
+    },
+    {
+      "model_code": "A33",
+      "count": 1
+    },
+    {
+      "model_code": "A36",
+      "count": 1
+    },
+    {
+      "model_code": "A24",
+      "count": 1
+    },
+    {
+      "model_code": "S10",
+      "count": 1
+    },
+    {
+      "model_code": "A80",
+      "count": 1
+    },
+    {
+      "model_code": "A71",
+      "count": 1
+    },
+    {
+      "model_code": "A16",
+      "count": 1
+    },
+    {
+      "model_code": "A035F",
+      "count": 1
     }
   ],
   "promoted_to_learned_patterns": 0
