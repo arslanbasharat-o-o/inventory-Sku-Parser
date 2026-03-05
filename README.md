@@ -1,72 +1,82 @@
 # Inventory SKU Parser
 
-**The SEO-optimized SKU tracking and extraction tool for E-commerce & Inventory Management.**
+Production-grade SKU intelligence engine for mobile phone repair parts inventory.
 
-[![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-[![Made with Python & Next.js](https://img.shields.io/badge/Stack-Python%20%7C%20Next.js-success.svg)](#)
+[![Python Backend CI](https://github.com/arslanbasharat-o-o/inventory-Sku-Parser/actions/workflows/python-backend-ci.yml/badge.svg)](https://github.com/arslanbasharat-o-o/inventory-Sku-Parser/actions/workflows/python-backend-ci.yml)
+[![Next.js Frontend CI](https://github.com/arslanbasharat-o-o/inventory-Sku-Parser/actions/workflows/nextjs-frontend-ci.yml/badge.svg)](https://github.com/arslanbasharat-o-o/inventory-Sku-Parser/actions/workflows/nextjs-frontend-ci.yml)
 
-## Overview
-**Inventory SKU Parser** is an efficient, intelligent parsing engine specifically designed to process bulk eCommerce inventory lists, automatically detect missing SKUs, extract product titles, and generate standardized Web/Product SKUs.
+## Version
+- Current release: `v3.0.0`
+- Changelog: [`CHANGELOG.md`](./CHANGELOG.md)
 
-If you process unstructured data from suppliers, large CSV/Excel drops, or require strict inventory compliance for SEO-friendly URLs, this application standardizes the data seamlessly.
+## What It Does
+- Parses messy inventory titles into standardized SKUs.
+- Uses a 5-layer parser pipeline (rules, ontology, fuzzy, learning, vectors).
+- Enforces battery standardization to `BATT`.
+- Supports multi-component titles with part-priority resolution.
+- Provides live title analysis API + batch Excel/CSV processing.
+- Generates validation reports for parser quality and performance.
 
-### Core Features
-- **Intelligent SKU Extraction:** Utilizes NLP and trained patterns to structure unformatted product titles.
-- **Bulk Processing:** Supports `.xlsx` and `.csv` file uploads, capable of processing thousands of rows in seconds.
-- **Single SKU Generator:** A dedicated UI component for manual SKU generation to standardize new inventory entries.
-- **Analytics & Error Checking:** Built-in duplicate detection for both Titles and SKUs to ensure inventory accuracy.
-- **Modern Next.js Frontend:** Responsive user interface utilizing Tailwind CSS and React.
-- **Scalable Python Backend:** Powered by Flask and Gunicorn, engineered for multi-tenant deployment.
+## Architecture
+- `app.py`: Flask API for bulk parser workflow and downloads.
+- `fastapi_app.py`: FastAPI live analyzer and structured parser endpoints.
+- `structured_sku_parser.py`: rule-first parser with OpenAI structured fallback.
+- `sku_intelligence_engine.py`: core parsing logic and learning subsystems.
+- `sku_validation_framework.py`: full validation suite and report generator.
+- `frontend/`: Next.js dashboard.
 
-## Installation
+## Quick Start
 
-### 1. Backend Setup (Python Engine)
+### 1) Backend setup
 ```bash
-# Clone the repository
-git clone https://github.com/arslanbasharat-o-o/inventory-Sku-Parser.git
-cd inventory-Sku-Parser
-
-# Create a virtual environment
 python3 -m venv .venv
 source .venv/bin/activate
-
-# Install dependencies
 pip install -r requirements.txt
+```
 
-# Run the parser engine
+### 2) Run Flask bulk parser service
+```bash
 python app.py
 ```
 
-### 2. Frontend Setup (Next.js Dashboard)
+### 3) Run FastAPI live analyzer service
 ```bash
-# Navigate to the frontend directory
+uvicorn fastapi_app:app --host 0.0.0.0 --port 8000 --reload
+```
+
+### 4) Run Next.js frontend
+```bash
 cd frontend
-
-# Install Node dependencies
 npm install
-
-# Start the development server
 npm run dev
 ```
 
-## E-commerce SEO Benefits
-Standardizing product SKUs translates directly into improved inventory management and cleaner URL structures for your storefront. This parser ensures data consistency across:
-- **Google Merchant Center Feeds**
-- **Shopify/WooCommerce Product Slugs**
-- **Internal Site Search Architecture**
+## API Endpoints
+- `GET /healthz`
+- `POST /analyze-title`
+- `POST /analyze-title/batch`
+- `POST /process-inventory-excel`
+- `GET /cache/status`
+- `DELETE /cache`
 
-## Architecture Stack
-- **Backend Environment:** Python, Flask, Gunicorn
-- **Frontend Environment:** Next.js (React), Tailwind CSS
-- **AI/Pattern Matching:** Custom regex engines, learned pattern storage (`learned_patterns.json`)
+## Validation
+Run full parser validation:
+```bash
+python sku_validation_framework.py --strict
+```
 
-## Deployment
-The repository includes configuration files for scalable deployments:
-- Docker support (`deploy/docker/Dockerfile.api`, `docker-compose.scaling.yml`)
-- Kubernetes manifests (`deploy/k8s/`)
+Generated reports:
+- `outputs/sku_validation_report.json`
+- `outputs/sku_validation_report.md`
 
-## Contributing
-Contributions, issues, and feature requests are welcome. Feel free to open an issue or submit a pull request for major changes.
+## CI/CD
+Workflows:
+- `.github/workflows/python-backend-ci.yml`
+- `.github/workflows/nextjs-frontend-ci.yml`
+- `.github/workflows/python-backend-cd.yml`
+- `.github/workflows/nextjs-frontend-cd.yml`
 
----
-**License:** MIT License
+Backend CD builds Docker image, runs `/healthz` smoke test, and can publish to GHCR on version tags.
+
+## License
+MIT (see [`LICENSE`](./LICENSE)).
