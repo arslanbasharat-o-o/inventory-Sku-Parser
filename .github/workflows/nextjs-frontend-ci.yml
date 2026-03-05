@@ -79,18 +79,21 @@ jobs:
           cat /tmp/frontend-build-turbo.log
           echo "::error file=frontend-build::webpack exit code=${webpack_status}, turbopack exit code=${turbo_status}"
 
+          tr '\r' '\n' < /tmp/frontend-build-webpack.log > /tmp/frontend-build-webpack.norm.log
+          tr '\r' '\n' < /tmp/frontend-build-turbo.log > /tmp/frontend-build-turbo.norm.log
+
           while IFS= read -r line; do
             esc="${line//'%'/'%25'}"
             esc="${esc//$'\r'/'%0D'}"
             esc="${esc//$'\n'/'%0A'}"
             echo "::error file=frontend-build-webpack::${esc}"
-          done < <(tail -n 25 /tmp/frontend-build-webpack.log)
+          done < <(tail -n 120 /tmp/frontend-build-webpack.norm.log)
 
           while IFS= read -r line; do
             esc="${line//'%'/'%25'}"
             esc="${esc//$'\r'/'%0D'}"
             esc="${esc//$'\n'/'%0A'}"
             echo "::error file=frontend-build-turbo::${esc}"
-          done < <(tail -n 25 /tmp/frontend-build-turbo.log)
+          done < <(tail -n 120 /tmp/frontend-build-turbo.norm.log)
 
           exit 1
