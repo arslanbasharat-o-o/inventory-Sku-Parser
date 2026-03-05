@@ -1,14 +1,84 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import { FileUploader } from "@/components/FileUploader";
 import { ParserControls } from "@/components/ParserControls";
 import { ResultsTable } from "@/components/ResultsTable";
-import { parseInventory, downloadProcessedFileUrl, generateSingleSku } from "@/lib/api";
-import { ParseResponse } from "@/types";
-import { AlertTriangle, CheckCircle2, Box } from "lucide-react";
+import { analyzeTitle, parseInventory, downloadProcessedFileUrl, generateSingleSku } from "@/lib/api";
+import { AnalyzeTitleResponse, ParseResponse } from "@/types";
+import { AlertTriangle, CheckCircle2, Box, Loader2, Sparkles } from "lucide-react";
 
 const STORAGE_KEY = "sku_parser_last_result";
+const EXAMPLE_TITLES = [
+  "Samsung A52 Charging Port",
+  "Galaxy A50 Battery",
+  "Pixel 7 Pro Back Camera",
+  "Samsung A30 Power Volume Flex",
+  "Googel Pixle 9A Battry",
+];
+
+function confidenceMeta(confidence: number) {
+  if (confidence > 0.9) {
+    return {
+      label: "High",
+      badgeClass: "bg-emerald-100 text-emerald-700 border-emerald-200",
+      barClass: "bg-emerald-500",
+    };
+  }
+  if (confidence >= 0.7) {
+    return {
+      label: "Review",
+      badgeClass: "bg-amber-100 text-amber-700 border-amber-200",
+      barClass: "bg-amber-500",
+    };
+  }
+  return {
+    label: "Low",
+    badgeClass: "bg-rose-100 text-rose-700 border-rose-200",
+    barClass: "bg-rose-500",
+  };
+}
+
+function getApiErrorMessage(
+  err: unknown,
+  fallback: string,
+  serviceUrl?: string,
+): string {
+  if (!err || typeof err !== "object") {
+    return fallback;
+  }
+
+  const maybeAxios = err as {
+    code?: string;
+    message?: string;
+    response?: {
+      status?: number;
+      data?: { error?: unknown; detail?: unknown };
+    };
+  };
+
+  if (!maybeAxios.response) {
+    if (serviceUrl) {
+      return `Cannot connect to parser backend at ${serviceUrl}. Start the backend server and retry.`;
+    }
+    return "Cannot connect to backend service. Start the server and retry.";
+  }
+
+  const status = maybeAxios.response.status;
+  const apiError = maybeAxios.response.data?.error ?? maybeAxios.response.data?.detail;
+  if (typeof apiError === "string" && apiError.trim()) {
+    return apiError;
+  }
+
+  if (status === 413) {
+    return "File is too large. Maximum upload size is 20 MB.";
+  }
+  if (status === 429) {
+    return "Server is busy processing other files. Please retry in a moment.";
+  }
+
+  return fallback;
+}
 
 export default function Dashboard() {
   const [file, setFile] = useState<File | null>(null);
@@ -24,6 +94,10 @@ export default function Dashboard() {
   const [singleStatus, setSingleStatus] = useState<"parsed" | "not_understandable" | null>(null);
   const [singleError, setSingleError] = useState<string | null>(null);
   const [isGeneratingSingle, setIsGeneratingSingle] = useState(false);
+  const [singleAnalysis, setSingleAnalysis] = useState<AnalyzeTitleResponse | null>(null);
+  const [singleAnalysisError, setSingleAnalysisError] = useState<string | null>(null);
+  const [isAnalyzingSingle, setIsAnalyzingSingle] = useState(false);
+  const latestSingleAnalysisRequestRef = useRef(0);
 
   // Restore from localStorage on mount
   useEffect(() => {
@@ -38,6 +112,63 @@ export default function Dashboard() {
       // ignore corrupt data
     }
   }, []);
+
+  useEffect(() => {
+    const title = singleTitle.trim();
+    const productSku = singleProductSku.trim();
+    const productWebSku = singleWebSku.trim();
+
+    if (!title && !productSku && !productWebSku) {
+      latestSingleAnalysisRequestRef.current += 1;
+      setSingleAnalysis(null);
+      setSingleAnalysisError(null);
+      setIsAnalyzingSingle(false);
+      return;
+    }
+
+    const timeout = window.setTimeout(async () => {
+      const requestId = Date.now();
+      latestSingleAnalysisRequestRef.current = requestId;
+      setSingleAnalysisError(null);
+      setIsAnalyzingSingle(true);
+
+      try {
+        const response = await analyzeTitle({
+          title,
+          product_sku: productSku,
+          product_web_sku: productWebSku,
+        });
+
+        if (latestSingleAnalysisRequestRef.current !== requestId) {
+          return;
+        }
+
+        setSingleAnalysis(response);
+        if (response.parse_status === "not_understandable") {
+          setSingleAnalysisError("Unable to interpret title");
+        }
+      } catch (err) {
+        if (latestSingleAnalysisRequestRef.current !== requestId) {
+          return;
+        }
+        console.error(err);
+        setSingleAnalysis(null);
+        setSingleAnalysisError(
+          getApiErrorMessage(
+            err,
+            "Unable to interpret title",
+            "http://127.0.0.1:8000",
+          ),
+        );
+      } finally {
+        if (latestSingleAnalysisRequestRef.current === requestId) {
+          setIsAnalyzingSingle(false);
+        }
+      }
+    }, 350);
+
+    return () => window.clearTimeout(timeout);
+  }, [singleTitle, singleProductSku, singleWebSku]);
 
   // Drag and drop handlers
   const handleDragEnter = (e: React.DragEvent) => {
@@ -99,7 +230,13 @@ export default function Dashboard() {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(response));
     } catch (err) {
       console.error(err);
-      setError("Parser failed. Please check file format or server status.");
+      setError(
+        getApiErrorMessage(
+          err,
+          "Parser failed. Please check file format or server status.",
+          "http://127.0.0.1:5000",
+        ),
+      );
     } finally {
       setIsGenerating(false);
     }
@@ -142,7 +279,13 @@ export default function Dashboard() {
       setSingleStatus(response.parse_status);
     } catch (err) {
       console.error(err);
-      setSingleError("Failed to generate SKU. Check server status.");
+      setSingleError(
+        getApiErrorMessage(
+          err,
+          "Failed to generate SKU. Check server status.",
+          "http://127.0.0.1:5000",
+        ),
+      );
       setSingleSkuResult(null);
       setSingleStatus(null);
     } finally {
@@ -151,13 +294,25 @@ export default function Dashboard() {
   };
 
   const handleClearSingleSku = () => {
+    latestSingleAnalysisRequestRef.current += 1;
     setSingleTitle("");
     setSingleProductSku("");
     setSingleWebSku("");
     setSingleSkuResult(null);
     setSingleStatus(null);
     setSingleError(null);
+    setSingleAnalysis(null);
+    setSingleAnalysisError(null);
+    setIsAnalyzingSingle(false);
   };
+
+  const singleConfidencePercent = useMemo(() => {
+    const value = singleAnalysis?.confidence ?? 0;
+    return Math.max(0, Math.min(100, Math.round(value * 100)));
+  }, [singleAnalysis]);
+
+  const singleConfidence = singleAnalysis?.confidence ?? 0;
+  const singleConfidenceUi = confidenceMeta(singleConfidence);
 
   return (
     <div className="min-h-screen bg-[#f8faf9] font-sans text-gray-900 pb-20">
@@ -220,22 +375,11 @@ export default function Dashboard() {
           </div>
         )}
 
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
-          {/* Left Column: Upload */}
-          <div className="lg:col-span-4 space-y-6">
-            <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-6">
-              <FileUploader
-                file={file}
-                onFileSelect={handleFileSelect}
-                isDragging={isDragging}
-                onDragEnter={handleDragEnter}
-                onDragLeave={handleDragLeave}
-                onDragOver={handleDragOver}
-                onDrop={handleDrop}
-              />
-            </div>
-
-            <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-6 space-y-4">
+        <div className="flex flex-col gap-6 items-stretch">
+          {/* Top Row: Two Equal Width Cards */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-stretch">
+            {/* Left Card: Single Generator */}
+            <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-6 flex flex-col gap-4 h-full">
               <div>
                 <h2 className="text-lg font-semibold text-gray-800">Single Title SKU Generator</h2>
                 <p className="text-sm text-gray-500">
@@ -253,7 +397,7 @@ export default function Dashboard() {
                     onChange={(e) => setSingleTitle(e.target.value)}
                     rows={3}
                     className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900 focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-200"
-                    placeholder="Galaxy A52 A525 Power Button Flex"
+                    placeholder="Type a product title..."
                   />
                 </div>
 
@@ -281,6 +425,24 @@ export default function Dashboard() {
                     />
                   </div>
                 </div>
+
+                <div className="rounded-lg border border-gray-200 bg-gray-50 p-3">
+                  <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-600">
+                    Examples
+                  </p>
+                  <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                    {EXAMPLE_TITLES.map((example) => (
+                      <button
+                        key={example}
+                        type="button"
+                        onClick={() => setSingleTitle(example)}
+                        className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-left text-xs font-medium text-gray-700 transition hover:border-emerald-300 hover:text-gray-900"
+                      >
+                        {example}
+                      </button>
+                    ))}
+                  </div>
+                </div>
               </div>
 
               {singleError && (
@@ -292,11 +454,11 @@ export default function Dashboard() {
               {singleSkuResult && (
                 <div
                   className={`rounded-lg border px-3 py-2 ${singleStatus === "parsed"
-                      ? "border-emerald-200 bg-emerald-50 text-emerald-800"
-                      : "border-amber-200 bg-amber-50 text-amber-800"
+                    ? "border-emerald-200 bg-emerald-50 text-emerald-800"
+                    : "border-amber-200 bg-amber-50 text-amber-800"
                     }`}
                 >
-                  <p className="text-xs font-semibold uppercase tracking-wide">Generated SKU</p>
+                  <p className="text-xs font-semibold uppercase tracking-wide">Generated SKU (Manual Run)</p>
                   <p className="text-base font-bold">{singleSkuResult}</p>
                 </div>
               )}
@@ -317,17 +479,126 @@ export default function Dashboard() {
                   Clear
                 </button>
               </div>
-            </div>
-          </div>
 
-          {/* Right Column: Controls & Table */}
-          <div className="lg:col-span-8 space-y-6">
-            <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-6 flex flex-col gap-6">
-              <div className="flex flex-col sm:flex-row gap-4 justify-between items-start sm:items-center">
-                <div>
-                  <h2 className="text-lg font-semibold text-gray-800">Parser Controls</h2>
-                  <p className="text-sm text-gray-500">Generate and review your parsed inventory.</p>
+              <div className="rounded-xl border border-gray-200 p-4 space-y-3">
+                <div className="flex items-center justify-between gap-3">
+                  <h3 className="text-sm font-semibold text-gray-900">Live Analysis</h3>
+                  {isAnalyzingSingle && (
+                    <div className="inline-flex items-center gap-1.5 rounded-full border border-gray-200 bg-gray-50 px-2.5 py-1 text-xs font-semibold text-gray-600">
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      Parsing
+                    </div>
+                  )}
                 </div>
+
+                {singleAnalysisError ? (
+                  <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+                    {singleAnalysisError}
+                  </div>
+                ) : singleAnalysis ? (
+                  <div className="space-y-3">
+                    <div className="rounded-lg border border-gray-200 bg-gray-50 p-3">
+                      <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">Predicted SKU</p>
+                      <p className="mt-1 text-base font-bold text-gray-900">{singleAnalysis.sku || "-"}</p>
+                    </div>
+
+                    <div className="rounded-lg border border-gray-200 p-3">
+                      <div className="mb-2 flex items-center justify-between">
+                        <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">Confidence</p>
+                        <span className={`inline-flex items-center rounded-full border px-2 py-1 text-xs font-semibold ${singleConfidenceUi.badgeClass}`}>
+                          {singleConfidenceUi.label}
+                        </span>
+                      </div>
+                      <div className="mb-1.5 h-2 overflow-hidden rounded-full bg-gray-100">
+                        <div
+                          className={`h-full transition-all ${singleConfidenceUi.barClass}`}
+                          style={{ width: `${singleConfidencePercent}%` }}
+                        />
+                      </div>
+                      <p className="text-sm font-semibold text-gray-700">{singleConfidencePercent}%</p>
+                    </div>
+
+                    <div className="rounded-lg border border-gray-200 p-3">
+                      <h4 className="text-xs font-semibold uppercase tracking-wide text-gray-500">Parsing Details</h4>
+                      <dl className="mt-2 grid grid-cols-1 gap-2 text-sm sm:grid-cols-2">
+                        <div>
+                          <dt className="text-gray-500">Brand detected</dt>
+                          <dd className="font-semibold text-gray-800">{singleAnalysis.brand || "-"}</dd>
+                        </div>
+                        <div>
+                          <dt className="text-gray-500">Model detected</dt>
+                          <dd className="font-semibold text-gray-800">{singleAnalysis.model || "-"}</dd>
+                        </div>
+                        <div>
+                          <dt className="text-gray-500">Model code</dt>
+                          <dd className="font-semibold text-gray-800">{singleAnalysis.model_code || "-"}</dd>
+                        </div>
+                        <div>
+                          <dt className="text-gray-500">Primary component</dt>
+                          <dd className="font-semibold text-gray-800">{singleAnalysis.part || "-"}</dd>
+                        </div>
+                        <div>
+                          <dt className="text-gray-500">Secondary component</dt>
+                          <dd className="font-semibold text-gray-800">{singleAnalysis.secondary_part || "-"}</dd>
+                        </div>
+                        <div>
+                          <dt className="text-gray-500">Parser reason</dt>
+                          <dd className="font-semibold text-gray-800">{singleAnalysis.parser_reason || "-"}</dd>
+                        </div>
+                      </dl>
+                    </div>
+
+                    <div className="rounded-lg border border-gray-200 p-3">
+                      <div className="mb-2 flex items-center gap-2">
+                        <Sparkles className="h-4 w-4 text-gray-500" />
+                        <h4 className="text-xs font-semibold uppercase tracking-wide text-gray-500">Spelling Corrections</h4>
+                      </div>
+                      {singleAnalysis.corrections.length > 0 ? (
+                        <ul className="space-y-2">
+                          {singleAnalysis.corrections.map((item, idx) => (
+                            <li
+                              key={`${item.from}-${item.to}-${idx}`}
+                              className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-xs font-medium text-gray-700"
+                            >
+                              <span className="font-mono text-gray-900">{item.from}</span>
+                              <span className="px-2 text-gray-400">→</span>
+                              <span className="font-mono text-gray-900">{item.to}</span>
+                            </li>
+                          ))}
+                        </ul>
+                      ) : (
+                        <p className="text-sm text-gray-600">No spelling corrections were applied.</p>
+                      )}
+                    </div>
+                  </div>
+                ) : (
+                  <div className="rounded-lg border border-gray-200 bg-gray-50 p-3 text-sm text-gray-600">
+                    Start typing in the title input to see live analysis.
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Right Card: Bulk Upload & Controls */}
+            <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-6 flex flex-col gap-6 h-full">
+              <div>
+                <h2 className="text-lg font-semibold text-gray-800">Bulk Inventory Parser</h2>
+                <p className="text-sm text-gray-500">Upload your file, generate SKUs, and review the parsed inventory.</p>
+              </div>
+
+              <div className="flex-1">
+                <FileUploader
+                  file={file}
+                  onFileSelect={handleFileSelect}
+                  isDragging={isDragging}
+                  onDragEnter={handleDragEnter}
+                  onDragLeave={handleDragLeave}
+                  onDragOver={handleDragOver}
+                  onDrop={handleDrop}
+                />
+              </div>
+
+              <div className="pt-4 border-t border-gray-100 mt-auto">
                 <ParserControls
                   onGenerate={handleGenerate}
                   onClear={handleClear}
@@ -336,91 +607,93 @@ export default function Dashboard() {
                   hasData={!!data}
                 />
               </div>
-
-              {data && (
-                <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4 pt-4 border-t border-gray-100">
-                  <div className="bg-gray-50 rounded-lg p-3 border border-gray-100">
-                    <p className="text-xs text-gray-500 uppercase font-semibold">Total Rows</p>
-                    <p className="text-xl font-bold text-gray-900">{data.stats?.total_rows}</p>
-                  </div>
-                  <div className="bg-emerald-50 rounded-lg p-3 border border-emerald-100">
-                    <p className="text-xs text-emerald-600/80 uppercase font-semibold">Parsed</p>
-                    <p className="text-xl font-bold text-emerald-700">{data.stats?.parsed_rows}</p>
-                  </div>
-                  <div className="bg-blue-50 rounded-lg p-3 border border-blue-100">
-                    <p className="text-xs text-blue-600/80 uppercase font-semibold">Accuracy</p>
-                    <p className="text-xl font-bold text-blue-700">
-                      {data.stats?.total_rows
-                        ? `${((data.stats.parsed_rows / data.stats.total_rows) * 100).toFixed(1)}%`
-                        : "—"}
-                    </p>
-                  </div>
-                  <div className="bg-red-50 rounded-lg p-3 border border-red-100">
-                    <p className="text-xs text-red-600/80 uppercase font-semibold">Dup SKUs</p>
-                    <p className="text-xl font-bold text-red-700">{data.stats?.sku_duplicates}</p>
-                  </div>
-                  <div className="bg-amber-50 rounded-lg p-3 border border-amber-100">
-                    <p className="text-xs text-amber-600/80 uppercase font-semibold">Dup Titles</p>
-                    <p className="text-xl font-bold text-amber-700">{data.stats?.title_duplicates}</p>
-                  </div>
-                </div>
-              )}
             </div>
           </div>
-        </div>
 
-        {/* Skeleton while parsing */}
-        {isGenerating && (
-          <div className="bg-white border rounded-xl shadow-sm overflow-hidden">
-            {/* Toolbar skeleton */}
-            <div className="p-4 border-b flex gap-4">
-              <div className="h-9 w-56 bg-gray-100 rounded-lg animate-pulse" />
-              <div className="ml-auto h-9 w-36 bg-gray-100 rounded-lg animate-pulse" />
-              <div className="h-9 w-24 bg-gray-100 rounded-lg animate-pulse" />
+          {/* Stats Row */}
+          {data && (
+            <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-6">
+              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4">
+                <div className="bg-gray-50 rounded-lg p-3 border border-gray-100">
+                  <p className="text-xs text-gray-500 uppercase font-semibold">Total Rows</p>
+                  <p className="text-xl font-bold text-gray-900">{data.stats?.total_rows}</p>
+                </div>
+                <div className="bg-emerald-50 rounded-lg p-3 border border-emerald-100">
+                  <p className="text-xs text-emerald-600/80 uppercase font-semibold">Parsed</p>
+                  <p className="text-xl font-bold text-emerald-700">{data.stats?.parsed_rows}</p>
+                </div>
+                <div className="bg-blue-50 rounded-lg p-3 border border-blue-100">
+                  <p className="text-xs text-blue-600/80 uppercase font-semibold">Accuracy</p>
+                  <p className="text-xl font-bold text-blue-700">
+                    {data.stats?.total_rows
+                      ? `${((data.stats.parsed_rows / data.stats.total_rows) * 100).toFixed(1)}%`
+                      : "—"}
+                  </p>
+                </div>
+                <div className="bg-red-50 rounded-lg p-3 border border-red-100">
+                  <p className="text-xs text-red-600/80 uppercase font-semibold">Dup SKUs</p>
+                  <p className="text-xl font-bold text-red-700">{data.stats?.sku_duplicates}</p>
+                </div>
+                <div className="bg-amber-50 rounded-lg p-3 border border-amber-100">
+                  <p className="text-xs text-amber-600/80 uppercase font-semibold">Dup Titles</p>
+                  <p className="text-xl font-bold text-amber-700">{data.stats?.title_duplicates}</p>
+                </div>
+              </div>
             </div>
-            {/* Header skeleton */}
-            <div className="flex gap-4 px-4 py-3 border-b bg-gray-50">
-              {["40%", "15%", "15%", "15%", "7%", "7%"].map((w, i) => (
-                <div key={i} className="h-3 bg-gray-200 rounded animate-pulse" style={{ width: w }} />
-              ))}
-            </div>
-            {/* Row skeletons */}
-            {Array.from({ length: 12 }).map((_, i) => (
-              <div
-                key={i}
-                className="flex gap-4 px-4 py-3 border-b"
-                style={{ opacity: 1 - i * 0.06 }}
-              >
-                {["40%", "15%", "15%", "15%", "7%", "7%"].map((w, j) => (
-                  <div
-                    key={j}
-                    className="h-3 bg-gray-100 rounded animate-pulse"
-                    style={{ width: w, animationDelay: `${j * 40}ms` }}
-                  />
+          )}
+
+          {/* Skeleton while parsing */}
+          {isGenerating && (
+            <div className="bg-white border rounded-xl shadow-sm overflow-hidden">
+              {/* Toolbar skeleton */}
+              <div className="p-4 border-b flex gap-4">
+                <div className="h-9 w-56 bg-gray-100 rounded-lg animate-pulse" />
+                <div className="ml-auto h-9 w-36 bg-gray-100 rounded-lg animate-pulse" />
+                <div className="h-9 w-24 bg-gray-100 rounded-lg animate-pulse" />
+              </div>
+              {/* Header skeleton */}
+              <div className="flex gap-4 px-4 py-3 border-b bg-gray-50">
+                {["40%", "15%", "15%", "15%", "7%", "7%"].map((w, i) => (
+                  <div key={i} className="h-3 bg-gray-200 rounded animate-pulse" style={{ width: w }} />
                 ))}
               </div>
-            ))}
-          </div>
-        )}
+              {/* Row skeletons */}
+              {Array.from({ length: 12 }).map((_, i) => (
+                <div
+                  key={i}
+                  className="flex gap-4 px-4 py-3 border-b"
+                  style={{ opacity: 1 - i * 0.06 }}
+                >
+                  {["40%", "15%", "15%", "15%", "7%", "7%"].map((w, j) => (
+                    <div
+                      key={j}
+                      className="h-3 bg-gray-100 rounded animate-pulse"
+                      style={{ width: w, animationDelay: `${j * 40}ms` }}
+                    />
+                  ))}
+                </div>
+              ))}
+            </div>
+          )}
 
-        {/* Full width table — fades and slides in */}
-        {data && !isGenerating && (
-          <div
-            style={{
-              animation: "fadeSlideIn 400ms cubic-bezier(0.22, 1, 0.36, 1) both",
-            }}
-          >
-            <ResultsTable data={data.rows} />
-          </div>
-        )}
+          {/* Full width table — fades and slides in */}
+          {data && !isGenerating && (
+            <div
+              style={{
+                animation: "fadeSlideIn 400ms cubic-bezier(0.22, 1, 0.36, 1) both",
+              }}
+            >
+              <ResultsTable data={data.rows} />
+            </div>
+          )}
 
-        <style>{`
+          <style>{`
           @keyframes fadeSlideIn {
             from { opacity: 0; transform: translateY(16px); }
             to   { opacity: 1; transform: translateY(0); }
           }
         `}</style>
-
+        </div>
       </main>
     </div>
   );
