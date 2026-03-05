@@ -32,7 +32,7 @@ except Exception:  # pragma: no cover - optional dependency
 try:
     import faiss  # type: ignore
     import numpy as np
-    from sentence_transformers import SentenceTransformer
+    from sentence_transformers import SentenceTransformer  # type: ignore[reportMissingImports]
 
     VECTOR_LIBS_AVAILABLE = True
 except Exception:  # pragma: no cover - optional dependency
