@@ -72,6 +72,8 @@ def _refresh_parts_lookup() -> None:
     )
     _ENGINE._component_vocab = _ENGINE._build_component_vocabulary()
     _ENGINE._component_vocab_list = tuple(sorted(_ENGINE._component_vocab))
+    _ENGINE._rebuild_phonetic_indexes()
+    _ENGINE._correct_token_cached.cache_clear()
     _ENGINE._rebuild_vector_index()
     _ENGINE._parse_cached.cache_clear()
 

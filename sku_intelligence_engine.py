@@ -30,6 +30,16 @@ except Exception:  # pragma: no cover - optional dependency
     rf_process = None  # type: ignore[assignment]
 
 try:
+    from metaphone import doublemetaphone as _double_metaphone  # type: ignore[reportMissingImports]
+
+    METAPHONE_AVAILABLE = True
+except Exception:  # pragma: no cover - optional dependency
+    METAPHONE_AVAILABLE = False
+
+    def _double_metaphone(value: str) -> tuple[str, str]:
+        return "", ""
+
+try:
     import faiss  # type: ignore
     import numpy as np
     from sentence_transformers import SentenceTransformer  # type: ignore[reportMissingImports]
@@ -68,11 +78,29 @@ BATTERY_ALIASES = {
 }
 
 DEFAULT_SPELLING_CORRECTIONS = {
+    "samsng": "samsung",
+    "samung": "samsung",
+    "smasung": "samsung",
+    "galaxi": "galaxy",
+    "pixl": "pixel",
+    "iphne": "iphone",
     "battry": "battery",
     "batery": "battery",
     "battary": "battery",
     "batry": "battery",
     "btry": "battery",
+    "speker": "speaker",
+    "speeker": "speaker",
+    "ear speeker": "earpiece speaker",
+    "ear speker": "earpiece speaker",
+    "charng": "charging",
+    "powr": "power",
+    "volum": "volume",
+    "camra": "camera",
+    "try": "tray",
+    "sim try": "sim tray",
+    "vib": "vibrator",
+    "motorr": "motor",
     "googel": "google",
     "goggle": "google",
     "pixle": "pixel",
@@ -119,6 +147,7 @@ GENERIC_NOISE = {
 MODEL_STOPWORDS = {
     "battery",
     "charging",
+    "charge",
     "port",
     "connector",
     "board",
@@ -140,6 +169,7 @@ MODEL_STOPWORDS = {
     "volume",
     "vibration",
     "vibrator",
+    "vib",
     "motor",
     "display",
     "screen",
@@ -224,6 +254,7 @@ PART_PRIORITY_TABLE: dict[str, int] = {
     "LS": 80,
     "ES-PS": 82,
     "VIB": 75,
+    "LIFT-MOT": 75,
     "ANNT-CONN": 70,
     "PV-F": 65,
     "PB-F": 65,
@@ -293,6 +324,7 @@ DEFAULT_PART_CODE_RULES: dict[str, str] = {
     "ear speaker and proximity sensor": "ES-PS",
     "vibration ear speaker": "V/ES",
     "vibration and ear speaker": "V/ES",
+    "lift motor": "LIFT-MOT",
 }
 
 DEFAULT_MOBILE_PARTS_ONTOLOGY: dict[str, str] = {
@@ -355,6 +387,7 @@ DEFAULT_MOBILE_PARTS_ONTOLOGY: dict[str, str] = {
     "front cam": "FC",
     "vibration motor": "VIB",
     "vibrator motor": "VIB",
+    "lift motor": "LIFT-MOT",
     "vibrator flex": "VB-F",
     "vibration flex": "VB-F",
     "loudspeaker flex": "L-FLEX",
@@ -431,6 +464,8 @@ class EngineConfig:
     pattern_min_frequency: int = 5
     pattern_ngram_min: int = 2
     pattern_ngram_max: int = 4
+    token_fuzzy_threshold: int = 85
+    token_difflib_cutoff: float = 0.85
     vector_model_name: str = "sentence-transformers/all-MiniLM-L6-v2"
     enable_vector_layer: bool = True
 
@@ -555,6 +590,9 @@ class SKUIntelligenceEngine:
 
         self._component_vocab = self._build_component_vocabulary()
         self._component_vocab_list = tuple(sorted(self._component_vocab))
+        self._soundex_index: dict[str, tuple[str, ...]] = {}
+        self._metaphone_index: dict[str, tuple[str, ...]] = {}
+        self._rebuild_phonetic_indexes()
         self._unknown_pattern_counter: dict[tuple[str, str], int] = {}
         self.vector_matcher = VectorMatcher(
             model_name=self.config.vector_model_name,
@@ -698,12 +736,232 @@ class SKUIntelligenceEngine:
         vocab.update(BATTERY_ALIASES)
         return {token.lower() for token in vocab if token}
 
+    @staticmethod
+    def _soundex(token: str) -> str:
+        token = re.sub(r"[^a-z]", "", token.lower())
+        if not token:
+            return ""
+        first = token[0].upper()
+        mapping = {
+            "b": "1",
+            "f": "1",
+            "p": "1",
+            "v": "1",
+            "c": "2",
+            "g": "2",
+            "j": "2",
+            "k": "2",
+            "q": "2",
+            "s": "2",
+            "x": "2",
+            "z": "2",
+            "d": "3",
+            "t": "3",
+            "l": "4",
+            "m": "5",
+            "n": "5",
+            "r": "6",
+        }
+        out: list[str] = [first]
+        prev = mapping.get(token[0], "")
+        for ch in token[1:]:
+            code = mapping.get(ch, "")
+            if code and code != prev:
+                out.append(code)
+            prev = code
+            if len(out) == 4:
+                break
+        while len(out) < 4:
+            out.append("0")
+        return "".join(out)
+
+    def _phonetic_keys(self, token: str) -> set[str]:
+        keys: set[str] = set()
+        if not token or any(ch.isdigit() for ch in token):
+            return keys
+        if len(token) < 3:
+            return keys
+        sx = self._soundex(token)
+        if sx:
+            keys.add(f"SX:{sx}")
+        if METAPHONE_AVAILABLE:
+            p1, p2 = _double_metaphone(token)
+            if p1:
+                keys.add(f"MP:{p1}")
+            if p2:
+                keys.add(f"MP:{p2}")
+        return keys
+
+    def _rebuild_phonetic_indexes(self) -> None:
+        soundex_map: dict[str, set[str]] = {}
+        metaphone_map: dict[str, set[str]] = {}
+        for token in self._component_vocab_list:
+            if len(token) < 3 or any(ch.isdigit() for ch in token):
+                continue
+            for key in self._phonetic_keys(token):
+                if key.startswith("SX:"):
+                    soundex_map.setdefault(key, set()).add(token)
+                elif key.startswith("MP:"):
+                    metaphone_map.setdefault(key, set()).add(token)
+        self._soundex_index = {
+            key: tuple(sorted(values))
+            for key, values in soundex_map.items()
+        }
+        self._metaphone_index = {
+            key: tuple(sorted(values))
+            for key, values in metaphone_map.items()
+        }
+
+    def _collect_phonetic_candidates(self, token: str) -> tuple[str, ...]:
+        candidates: set[str] = set()
+        for key in self._phonetic_keys(token):
+            if key.startswith("SX:"):
+                candidates.update(self._soundex_index.get(key, ()))
+            elif key.startswith("MP:"):
+                candidates.update(self._metaphone_index.get(key, ()))
+        return tuple(sorted(candidates))
+
+    def _apply_phrase_corrections(self, normalized_title: str) -> tuple[str, float]:
+        if not normalized_title:
+            return normalized_title, 1.0
+        phrase_map = {
+            typo: canonical
+            for typo, canonical in self.spelling_corrections.items()
+            if " " in typo
+        }
+        if not phrase_map:
+            return normalized_title, 1.0
+
+        corrected = normalized_title
+        confidence = 1.0
+        for typo, canonical in sorted(phrase_map.items(), key=lambda item: len(item[0]), reverse=True):
+            pattern = rf"\b{re.escape(typo)}\b"
+            if re.search(pattern, corrected):
+                corrected = re.sub(pattern, canonical, corrected)
+                confidence = min(confidence, 0.92)
+        corrected = RE_MULTI_SPACE.sub(" ", corrected).strip()
+        return corrected, confidence
+
+    @lru_cache(maxsize=50_000)
+    def _correct_token_cached(self, token: str) -> tuple[str, float, str]:
+        return self._correct_token_internal(token)
+
+    def _correct_token_internal(self, token: str) -> tuple[str, float, str]:
+        token = token.lower()
+        if token in BATTERY_ALIASES:
+            return "battery", 0.95, "battery_alias"
+
+        mapped = self.spelling_corrections.get(token)
+        if mapped:
+            if mapped in BATTERY_ALIASES:
+                return "battery", 0.93, "dictionary"
+            return mapped, 0.93, "dictionary"
+
+        if token in self._component_vocab:
+            return token, 0.99, "exact"
+
+        if len(token) < 2 or any(ch.isdigit() for ch in token):
+            return token, 0.99, "model_or_short"
+
+        if RAPIDFUZZ_AVAILABLE:
+            best = rf_process.extractOne(
+                token,
+                self._component_vocab_list,
+                scorer=fuzz.ratio,
+                score_cutoff=int(self.config.token_fuzzy_threshold),
+            )
+            if best:
+                candidate = str(best[0])
+                score = float(best[1])
+                if candidate in BATTERY_ALIASES:
+                    candidate = "battery"
+                conf = 0.80 + (score / 100.0) * 0.15
+                return candidate, min(0.94, conf), "fuzzy"
+
+        close = difflib.get_close_matches(
+            token,
+            self._component_vocab_list,
+            n=1,
+            cutoff=float(self.config.token_difflib_cutoff),
+        )
+        if close:
+            candidate = close[0]
+            if candidate in BATTERY_ALIASES:
+                candidate = "battery"
+            return candidate, 0.84, "difflib"
+
+        phonetic_candidates = self._collect_phonetic_candidates(token)
+        if phonetic_candidates:
+            selected = ""
+            if RAPIDFUZZ_AVAILABLE:
+                phonetic_best = rf_process.extractOne(
+                    token,
+                    phonetic_candidates,
+                    scorer=fuzz.ratio,
+                    score_cutoff=70,
+                )
+                if phonetic_best:
+                    selected = str(phonetic_best[0])
+            if not selected:
+                close_phonetic = difflib.get_close_matches(
+                    token,
+                    phonetic_candidates,
+                    n=1,
+                    cutoff=0.70,
+                )
+                if close_phonetic:
+                    selected = close_phonetic[0]
+            if selected:
+                if selected in BATTERY_ALIASES:
+                    selected = "battery"
+                return selected, 0.80, "phonetic"
+
+        return token, 0.65, "unchanged"
+
     def _normalize_with_token_corrections(self, normalized_title: str, learn: bool = False) -> str:
-        tokens = self.tokenize(normalized_title)
+        corrected, _confidence, _method = self._normalize_with_token_corrections_scored(
+            normalized_title,
+            learn=learn,
+        )
+        return corrected
+
+    def _normalize_with_token_corrections_scored(
+        self,
+        normalized_title: str,
+        learn: bool = False,
+    ) -> tuple[str, float, str]:
+        phrase_corrected, phrase_confidence = self._apply_phrase_corrections(normalized_title)
+        tokens = self.tokenize(phrase_corrected)
         if not tokens:
-            return normalized_title
-        corrected = [self._correct_token(token, learn=learn) for token in tokens]
-        return " ".join(corrected).strip() or normalized_title
+            return phrase_corrected, phrase_confidence, "exact"
+
+        corrected_tokens: list[str] = []
+        confidences: list[float] = [phrase_confidence]
+        methods: list[str] = []
+        for token in tokens:
+            corrected_token, token_conf, method = self._correct_token_cached(token)
+            corrected_tokens.append(corrected_token)
+            confidences.append(token_conf)
+            methods.append(method)
+            if learn and corrected_token != token:
+                self._maybe_learn_spelling_variation(token, corrected_token)
+
+        corrected = " ".join(corrected_tokens).strip() or phrase_corrected
+        min_confidence = min(confidences) if confidences else 1.0
+        exactish_methods = {"exact", "model_or_short"}
+        if all(method in exactish_methods for method in methods):
+            correction_method = "exact"
+        elif any(method == "dictionary" for method in methods):
+            correction_method = "dictionary"
+        elif any(method == "fuzzy" for method in methods):
+            correction_method = "fuzzy"
+        elif any(method == "phonetic" for method in methods):
+            correction_method = "phonetic"
+        elif any(method == "difflib" for method in methods):
+            correction_method = "difflib"
+        else:
+            correction_method = "unchanged"
+        return corrected, min_confidence, correction_method
 
     def _rebuild_vector_index(self) -> None:
         corpus: dict[str, str] = {}
@@ -905,66 +1163,25 @@ class SKUIntelligenceEngine:
             dict(sorted(learned.items())),
         )
         self.spelling_corrections[typo] = canonical
+        self._correct_token_cached.cache_clear()
         self._parse_cached.cache_clear()
 
-    def _correct_token(self, token: str, learn: bool = False) -> str:
-        token = token.lower()
-        if token in self._component_vocab:
-            return token
-
-        mapped = self.spelling_corrections.get(token)
-        if mapped:
-            if mapped in BATTERY_ALIASES:
-                return "battery"
-            return mapped
-
-        if token in BATTERY_ALIASES:
-            return "battery"
-
-        if len(token) < 3 or any(ch.isdigit() for ch in token):
-            return token
-
-        suggestion = ""
-        if RAPIDFUZZ_AVAILABLE:
-            best = rf_process.extractOne(
-                token,
-                self._component_vocab_list,
-                scorer=fuzz.ratio,
-                score_cutoff=86,
-            )
-            if best:
-                suggestion = str(best[0])
-
-        if not suggestion:
-            close = difflib.get_close_matches(
-                token,
-                self._component_vocab_list,
-                n=1,
-                cutoff=0.88,
-            )
-            suggestion = close[0] if close else ""
-
-        if not suggestion:
-            return token
-
-        if suggestion in BATTERY_ALIASES:
-            suggestion = "battery"
-        if learn:
-            self._maybe_learn_spelling_variation(token, suggestion)
-        return suggestion
-
     def _layer3_fuzzy_interpreter(self, normalized_title: str) -> tuple[str, str, float]:
-        tokens = self.tokenize(normalized_title)
-        if not tokens:
+        corrected_title, correction_confidence, correction_method = self._normalize_with_token_corrections_scored(
+            normalized_title,
+            learn=False,
+        )
+        if not corrected_title:
             return "", "", 0.0
-
-        corrected_tokens = [self._correct_token(token) for token in tokens]
-        corrected_title = " ".join(corrected_tokens)
 
         if corrected_title != normalized_title:
             code, reason, _ = self._layer2_ontology_lookup(corrected_title)
             if code:
-                return code, "layer3_fuzzy_token_correction", 0.88
+                if correction_method == "dictionary":
+                    return code, "layer3_dictionary_correction", max(0.90, correction_confidence)
+                if correction_method == "phonetic":
+                    return code, "layer3_phonetic_correction", max(0.80, correction_confidence)
+                return code, "layer3_fuzzy_token_correction", max(0.84, correction_confidence)
 
         if not RAPIDFUZZ_AVAILABLE or not self.part_phrase_list:
             return "", "", 0.0
@@ -1126,6 +1343,25 @@ class SKUIntelligenceEngine:
             pos = corrected_title.find("connector")
             self._add_detected_code(detected, "FPC", "combo_rule", pos)
             detected.pop("CP", None)
+
+        if (
+            ({"charge", "connector", "board"} <= tokens)
+            or ({"charging", "connector", "board"} <= tokens)
+            or ({"charge", "connector"} <= tokens)
+        ):
+            pos = corrected_title.find("charge")
+            if pos < 0:
+                pos = corrected_title.find("charging")
+            self._add_detected_code(detected, "CP", "combo_rule", pos)
+            detected.pop("CF", None)
+
+        if {"ear", "receiver"} <= tokens:
+            pos = corrected_title.find("ear")
+            self._add_detected_code(detected, "ES", "combo_rule", pos)
+
+        if {"vibrator", "motor"} <= tokens:
+            pos = corrected_title.find("vibrator")
+            self._add_detected_code(detected, "VIB", "combo_rule", pos)
 
     def _spans_overlap(
         self,
@@ -1444,7 +1680,10 @@ class SKUIntelligenceEngine:
     ) -> tuple[str, float, str, str, str, str, str, str, str]:
         normalized_title = self.normalize_text(product_name)
         normalized_hint = self.normalize_text(f"{product_sku} {product_web_sku}")
-        corrected_title = self._normalize_with_token_corrections(normalized_title)
+        corrected_title, correction_confidence, correction_method = self._normalize_with_token_corrections_scored(
+            normalized_title,
+            learn=False,
+        )
 
         if self._should_filter_display_assembly(normalized_title):
             return (
@@ -1477,6 +1716,15 @@ class SKUIntelligenceEngine:
                 base_conf = conf
 
         part_code = self._canonicalize_part_code(part_code)
+        if correction_confidence < 0.95:
+            if correction_confidence >= 0.90:
+                base_conf = max(0.0, base_conf - 0.03)
+            elif correction_confidence >= 0.85:
+                base_conf = max(0.0, base_conf - 0.08)
+            else:
+                base_conf = max(0.0, base_conf - 0.15)
+        if reason and correction_method != "exact":
+            reason = f"{reason}+{correction_method}"
 
         variant = self._detect_variant(corrected_title)
         color = self._detect_color(corrected_title)
@@ -1746,6 +1994,8 @@ class SKUIntelligenceEngine:
             )
             self._component_vocab = self._build_component_vocabulary()
             self._component_vocab_list = tuple(sorted(self._component_vocab))
+            self._rebuild_phonetic_indexes()
+            self._correct_token_cached.cache_clear()
             self._rebuild_vector_index()
             self._parse_cached.cache_clear()
 

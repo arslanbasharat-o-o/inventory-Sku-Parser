@@ -42,13 +42,13 @@ function EditableCell({ value, rowIndex, columnKey, onSave, highlight }: {
             <input autoFocus value={draft}
                 onChange={e => setDraft(e.target.value)} onBlur={commit}
                 onKeyDown={e => { if (e.key === "Enter") commit(); if (e.key === "Escape") { setDraft(value); setEditing(false); } }}
-                className="border border-emerald-400 rounded px-1.5 py-0.5 text-xs font-mono w-full min-w-[100px] focus:outline-none bg-emerald-50" />
+                className="ring-1 ring-inset ring-emerald-400 rounded px-0.5 py-0 h-5 text-xs font-mono w-full min-w-[100px] focus:outline-none bg-emerald-50" />
             <button onClick={commit} className="text-emerald-600 flex-shrink-0"><Check size={13} /></button>
         </span>
     );
     return (
         <span
-            className={`group inline-flex items-center gap-1 cursor-pointer rounded px-1 -mx-1 hover:bg-gray-100/70 w-full overflow-hidden ${highlight ? "text-emerald-700 font-semibold" : ""}`}
+            className={`group inline-flex items-center gap-1 cursor-pointer rounded px-1 -mx-1 hover:bg-gray-100/70 w-full overflow-hidden min-h-[20px] ${highlight ? "text-emerald-700 font-semibold" : ""}`}
             onClick={() => setEditing(true)} title={value || "Click to edit"}
         >
             <span className="font-mono text-xs truncate">{value || <span className="text-gray-300">—</span>}</span>
@@ -98,8 +98,13 @@ function ColumnFilter({ columnId, table }: {
             if (!dropRef.current?.contains(e.target as Node) && !btnRef.current?.contains(e.target as Node))
                 setOpen(false);
         };
+        const handleScroll = () => setOpen(false);
         document.addEventListener("mousedown", handler);
-        return () => document.removeEventListener("mousedown", handler);
+        window.addEventListener("scroll", handleScroll, true);
+        return () => {
+            document.removeEventListener("mousedown", handler);
+            window.removeEventListener("scroll", handleScroll, true);
+        };
     }, [open, column]);
 
     if (!column) return null;
@@ -483,7 +488,6 @@ export function ResultsTable({ data, onDupStats }: ResultsTableProps) {
                                 {hg.headers.map(header => (
                                     <th key={header.id}
                                         className="px-3 py-3 text-left select-none relative border-b border-gray-200 bg-gray-50"
-                                        style={{ width: colWidths[header.id] ?? 160 }}
                                     >
                                         {/* inner div clips text; th itself must NOT clip so dropdown escapes */}
                                         <div className="flex items-center gap-1 overflow-hidden pr-2">

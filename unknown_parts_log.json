@@ -3948,5 +3948,130 @@
     "title_pattern": "amaoe bga solder planting",
     "suggested_code": "ST",
     "count": 1
+  },
+  {
+    "title_pattern": "loudspeaker",
+    "suggested_code": "L-FLEX",
+    "count": 1
+  },
+  {
+    "title_pattern": "camera",
+    "suggested_code": "CAM-F",
+    "count": 1
+  },
+  {
+    "title_pattern": "antenna",
+    "suggested_code": "WIF-ANNT",
+    "count": 2
+  },
+  {
+    "title_pattern": "antenna",
+    "suggested_code": "ANNT-CONN",
+    "count": 2
+  },
+  {
+    "title_pattern": "sim reader",
+    "suggested_code": "SC-R",
+    "count": 1
+  },
+  {
+    "title_pattern": "mainboard",
+    "suggested_code": "MFC",
+    "count": 1
+  },
+  {
+    "title_pattern": "ear speaker",
+    "suggested_code": "ES-PS",
+    "count": 2
+  },
+  {
+    "title_pattern": "ear speaker",
+    "suggested_code": "V/ES",
+    "count": 1
+  },
+  {
+    "title_pattern": "charging",
+    "suggested_code": "CP",
+    "count": 4
+  },
+  {
+    "title_pattern": "charging",
+    "suggested_code": "CF",
+    "count": 1
+  },
+  {
+    "title_pattern": "charging headphone",
+    "suggested_code": "CP HJ",
+    "count": 2
+  },
+  {
+    "title_pattern": "sim reader pcb",
+    "suggested_code": "SC-R-PCB-SR",
+    "count": 2
+  },
+  {
+    "title_pattern": "+",
+    "suggested_code": "P/V-F",
+    "count": 1
+  },
+  {
+    "title_pattern": "battery",
+    "suggested_code": "BATT",
+    "count": 1
+  },
+  {
+    "title_pattern": "batt",
+    "suggested_code": "BATT",
+    "count": 1
+  },
+  {
+    "title_pattern": "bat",
+    "suggested_code": "BATT",
+    "count": 1
+  },
+  {
+    "title_pattern": "battry",
+    "suggested_code": "BATT",
+    "count": 1
+  },
+  {
+    "title_pattern": "batery",
+    "suggested_code": "BATT",
+    "count": 1
+  },
+  {
+    "title_pattern": "battary",
+    "suggested_code": "BATT",
+    "count": 1
+  },
+  {
+    "title_pattern": "battery charging",
+    "suggested_code": "BATT CP",
+    "count": 1
+  },
+  {
+    "title_pattern": "wireless charging",
+    "suggested_code": "NFC CF",
+    "count": 1
+  },
+  {
+    "title_pattern": "googel pixle battry",
+    "suggested_code": "BATT",
+    "count": 6
+  },
+  {
+    "title_pattern": "samsng galaxi charng",
+    "suggested_code": "CP",
+    "count": 1
+  },
+  {
+    "title_pattern": "galaxi ear speker",
+    "suggested_code": "ES",
+    "count": 5
+  },
+  {
+    "title_pattern": "pixl sim try",
+    "suggested_code": "ST",
+    "count": 4
   }
 ]

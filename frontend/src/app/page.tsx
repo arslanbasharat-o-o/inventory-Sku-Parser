@@ -182,7 +182,10 @@ export default function Dashboard() {
 
         {/* Error Alert */}
         {error && (
-          <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-xl flex items-center gap-3 shadow-sm animate-in fade-in slide-in-from-top-2">
+          <div
+            style={{ animation: "fadeSlideIn 300ms cubic-bezier(0.22, 1, 0.36, 1) both" }}
+            className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-xl flex items-center gap-3 shadow-sm"
+          >
             <AlertTriangle size={20} className="text-red-500 flex-shrink-0" />
             <p className="text-sm font-medium">{error}</p>
           </div>
@@ -206,7 +209,10 @@ export default function Dashboard() {
 
         {/* Success Alert */}
         {data && !error && !restoredFromCache && (
-          <div className="bg-emerald-50 border border-emerald-200 text-emerald-800 px-4 py-3 rounded-xl flex items-center gap-3 shadow-sm animate-in fade-in slide-in-from-top-2">
+          <div
+            style={{ animation: "fadeSlideIn 300ms cubic-bezier(0.22, 1, 0.36, 1) both" }}
+            className="bg-emerald-50 border border-emerald-200 text-emerald-800 px-4 py-3 rounded-xl flex items-center gap-3 shadow-sm"
+          >
             <CheckCircle2 size={20} className="text-emerald-500 flex-shrink-0" />
             <p className="text-sm font-medium">
               Successfully parsed {data.stats?.parsed_rows} out of {data.stats?.total_rows} rows.
@@ -285,11 +291,10 @@ export default function Dashboard() {
 
               {singleSkuResult && (
                 <div
-                  className={`rounded-lg border px-3 py-2 ${
-                    singleStatus === "parsed"
+                  className={`rounded-lg border px-3 py-2 ${singleStatus === "parsed"
                       ? "border-emerald-200 bg-emerald-50 text-emerald-800"
                       : "border-amber-200 bg-amber-50 text-amber-800"
-                  }`}
+                    }`}
                 >
                   <p className="text-xs font-semibold uppercase tracking-wide">Generated SKU</p>
                   <p className="text-base font-bold">{singleSkuResult}</p>

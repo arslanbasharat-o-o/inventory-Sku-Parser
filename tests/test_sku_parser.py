@@ -13,6 +13,7 @@ from sku_parser import (
     PART_CODE_RULES_FILE,
     UNKNOWN_LOG_FILE,
     generate_sku,
+    generate_sku_with_confidence,
     process_inventory,
     semantic_part_detection,
 )
@@ -241,3 +242,19 @@ def test_pattern_generator_learns_frequent_ngrams(tmp_path: Path) -> None:
     assert training_patterns_path.exists()
     training = json.loads(training_patterns_path.read_text(encoding="utf-8"))
     assert int(training.get("ngram_frequency_threshold", 0)) == 5
+
+
+def test_max_tolerance_title_interpreter_examples() -> None:
+    assert generate_sku("Googel Pixle 9A Battry") == "PIXEL 9A BATT"
+    assert generate_sku("Samsng A52 Charng Port") == "GALAXY A52 CP"
+    assert generate_sku("Galaxi A71 Ear Speker") == "GALAXY A71 ES"
+    assert generate_sku("Samung A50 Vib Motor") == "GALAXY A50 VIB"
+    assert generate_sku("Pixl 7 Pro Sim Try") == "PIXEL 7 ST"
+    assert generate_sku("Smasung A30 Powr Volum Flex") == "GALAXY A30 PV-F"
+
+
+def test_typo_correction_confidence_scoring() -> None:
+    exact = generate_sku_with_confidence("Samsung Galaxy A52 A525 Charging Port")
+    typo = generate_sku_with_confidence("Samsng Galaxi A52 Charng Port")
+    assert exact[1] > 0.90
+    assert typo[1] >= 0.70
