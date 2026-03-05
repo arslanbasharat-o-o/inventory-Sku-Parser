@@ -6,7 +6,7 @@ import { ParserControls } from "@/components/ParserControls";
 import { ResultsTable } from "@/components/ResultsTable";
 import { analyzeTitle, parseInventory, downloadProcessedFileUrl, generateSingleSku } from "@/lib/api";
 import { AnalyzeTitleResponse, ParseResponse } from "@/types";
-import { AlertTriangle, CheckCircle2, Box, Loader2, Sparkles } from "lucide-react";
+import { AlertTriangle, CheckCircle2, Box, Loader2 } from "lucide-react";
 
 function confidenceMeta(confidence: number) {
   if (confidence > 0.9) {
@@ -283,6 +283,38 @@ export default function Dashboard() {
     return Math.max(0, Math.min(100, Math.round(value * 100)));
   }, [singleAnalysis]);
 
+  const singleCorrectionPairs = useMemo(() => {
+    if (!singleAnalysis) {
+      return [] as { from: string; to: string }[];
+    }
+
+    if (singleAnalysis.correction_pairs && singleAnalysis.correction_pairs.length > 0) {
+      return singleAnalysis.correction_pairs.filter((item) => item.from || item.to);
+    }
+
+    const rawCorrections = Array.isArray(singleAnalysis.corrections)
+      ? singleAnalysis.corrections
+      : [];
+
+    return rawCorrections
+      .map((item) => {
+        if (typeof item !== "string") {
+          return { from: item.from ?? "", to: item.to ?? "" };
+        }
+
+        const arrow = item.includes("->") ? "->" : item.includes("→") ? "→" : "";
+        if (!arrow) {
+          return { from: item, to: item };
+        }
+
+        const [fromToken, toToken] = item.split(arrow, 2);
+        const from = (fromToken ?? "").trim();
+        const to = (toToken ?? "").trim() || from;
+        return { from, to };
+      })
+      .filter((item) => item.from || item.to);
+  }, [singleAnalysis]);
+
   const singleConfidence = singleAnalysis?.confidence ?? 0;
   const singleConfidenceUi = confidenceMeta(singleConfidence);
 
@@ -444,7 +476,7 @@ export default function Dashboard() {
                         { label: "Brand", value: singleAnalysis.brand },
                         { label: "Model", value: singleAnalysis.model },
                         { label: "Code", value: singleAnalysis.model_code },
-                        { label: "Part", value: singleAnalysis.part },
+                        { label: "Part", value: singleAnalysis.primary_part || singleAnalysis.part },
                         { label: "Sub-part", value: singleAnalysis.secondary_part },
                         { label: "Reason", value: singleAnalysis.parser_reason },
                       ].map(({ label, value }) => (
@@ -456,9 +488,9 @@ export default function Dashboard() {
                     </div>
 
                     {/* Spelling corrections — only shown when present */}
-                    {singleAnalysis.corrections.length > 0 && (
+                    {singleCorrectionPairs.length > 0 && (
                       <div className="flex flex-wrap gap-1.5 pt-0.5">
-                        {singleAnalysis.corrections.map((item, idx) => (
+                        {singleCorrectionPairs.map((item, idx) => (
                           <span
                             key={idx}
                             className="inline-flex items-center gap-1 rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-xs font-medium text-amber-800"
