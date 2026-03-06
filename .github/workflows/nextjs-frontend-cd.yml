@@ -32,7 +32,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: "22.22.0"
+          node-version: "22"
           cache: npm
           cache-dependency-path: frontend/package-lock.json
 
@@ -48,6 +48,7 @@ jobs:
         run: npm run lint
 
       - name: Build
+        shell: bash
         env:
           NEXT_TELEMETRY_DISABLED: "1"
           NODE_OPTIONS: "--max-old-space-size=4096"
@@ -78,19 +79,22 @@ jobs:
           tr '\r' '\n' < /tmp/frontend-build-webpack.log > /tmp/frontend-build-webpack.norm.log
           tr '\r' '\n' < /tmp/frontend-build-turbo.log > /tmp/frontend-build-turbo.norm.log
 
+          tail -n 120 /tmp/frontend-build-webpack.norm.log > /tmp/frontend-build-webpack.tail.log
+          tail -n 120 /tmp/frontend-build-turbo.norm.log > /tmp/frontend-build-turbo.tail.log
+
           while IFS= read -r line; do
             esc="${line//'%'/'%25'}"
             esc="${esc//$'\r'/'%0D'}"
             esc="${esc//$'\n'/'%0A'}"
             echo "::error file=frontend-build-webpack::${esc}"
-          done < <(tail -n 120 /tmp/frontend-build-webpack.norm.log)
+          done < /tmp/frontend-build-webpack.tail.log
 
           while IFS= read -r line; do
             esc="${line//'%'/'%25'}"
             esc="${esc//$'\r'/'%0D'}"
             esc="${esc//$'\n'/'%0A'}"
             echo "::error file=frontend-build-turbo::${esc}"
-          done < <(tail -n 120 /tmp/frontend-build-turbo.norm.log)
+          done < /tmp/frontend-build-turbo.tail.log
 
           exit 1
 
