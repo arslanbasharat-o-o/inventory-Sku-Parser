@@ -53,50 +53,19 @@ jobs:
           NEXT_TELEMETRY_DISABLED: "1"
           NODE_OPTIONS: "--max-old-space-size=4096"
         run: |
-          set +e
-          npm run build -- --webpack > /tmp/frontend-build-webpack.log 2>&1
-          webpack_status=$?
-          echo "Webpack exit code: ${webpack_status}"
-          if [ "$webpack_status" -eq 0 ]; then
-            cat /tmp/frontend-build-webpack.log
+          set -euo pipefail
+          echo "Webpack build attempt 1/2"
+          if npm run build -- --webpack; then
             exit 0
           fi
-
-          npm run build > /tmp/frontend-build-turbo.log 2>&1
-          turbo_status=$?
-          echo "Turbopack exit code: ${turbo_status}"
-          if [ "$turbo_status" -eq 0 ]; then
-            cat /tmp/frontend-build-turbo.log
+          echo "Webpack build attempt 1 failed; retrying once..."
+          sleep 5
+          echo "Webpack build attempt 2/2"
+          if npm run build -- --webpack; then
             exit 0
           fi
-
-          echo "Webpack build failed:"
-          cat /tmp/frontend-build-webpack.log
-          echo "Turbopack build failed:"
-          cat /tmp/frontend-build-turbo.log
-          echo "::error file=frontend-build::webpack exit code=${webpack_status}, turbopack exit code=${turbo_status}"
-
-          tr '\r' '\n' < /tmp/frontend-build-webpack.log > /tmp/frontend-build-webpack.norm.log
-          tr '\r' '\n' < /tmp/frontend-build-turbo.log > /tmp/frontend-build-turbo.norm.log
-
-          tail -n 120 /tmp/frontend-build-webpack.norm.log > /tmp/frontend-build-webpack.tail.log
-          tail -n 120 /tmp/frontend-build-turbo.norm.log > /tmp/frontend-build-turbo.tail.log
-
-          while IFS= read -r line; do
-            esc="${line//'%'/'%25'}"
-            esc="${esc//$'\r'/'%0D'}"
-            esc="${esc//$'\n'/'%0A'}"
-            echo "::error file=frontend-build-webpack::${esc}"
-          done < /tmp/frontend-build-webpack.tail.log
-
-          while IFS= read -r line; do
-            esc="${line//'%'/'%25'}"
-            esc="${esc//$'\r'/'%0D'}"
-            esc="${esc//$'\n'/'%0A'}"
-            echo "::error file=frontend-build-turbo::${esc}"
-          done < /tmp/frontend-build-turbo.tail.log
-
-          exit 1
+          echo "Webpack failed twice; trying Turbopack fallback once..."
+          npm run build
 
       - name: Package build artifact
         run: |
