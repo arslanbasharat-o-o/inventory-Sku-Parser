@@ -21,14 +21,18 @@ import {
 } from "@/types";
 import { Loader2, Upload, FlaskConical, CheckCircle2, AlertTriangle } from "lucide-react";
 
-function getApiErrorMessage(err: unknown, fallback: string, serviceUrl = "http://127.0.0.1:5000"): string {
+const TRAINING_BACKEND_URL =
+  process.env.NEXT_PUBLIC_PARSER_BACKEND_URL?.trim().replace(/\/+$/, "") ||
+  "http://127.0.0.1:5000";
+
+function getApiErrorMessage(err: unknown, fallback: string, serviceUrl = TRAINING_BACKEND_URL): string {
   if (!err || typeof err !== "object") {
     return fallback;
   }
 
   const maybeAxios = err as {
     response?: {
-      data?: { error?: unknown; detail?: unknown };
+      data?: { error?: unknown; detail?: unknown } | string;
       status?: number;
     };
   };
@@ -37,9 +41,31 @@ function getApiErrorMessage(err: unknown, fallback: string, serviceUrl = "http:/
     return `Cannot connect to training backend at ${serviceUrl}. Start backend server and retry.`;
   }
 
-  const apiError = maybeAxios.response.data?.error ?? maybeAxios.response.data?.detail;
-  if (typeof apiError === "string" && apiError.trim()) {
-    return apiError;
+  const data = maybeAxios.response.data;
+  const status = maybeAxios.response.status ?? 0;
+
+  if (status >= 500) {
+    if (typeof data === "string" && data.trim() && !/internal server error/i.test(data.trim())) {
+      const shortBody = data.trim();
+      if (shortBody.length < 220) {
+        return shortBody;
+      }
+    }
+    return `Cannot connect to training backend at ${serviceUrl}. Start backend server and retry.`;
+  }
+
+  if (data && typeof data === "object") {
+    const apiError = data.error ?? data.detail;
+    if (typeof apiError === "string" && apiError.trim()) {
+      return apiError;
+    }
+  }
+
+  if (typeof data === "string" && data.trim()) {
+    const body = data.trim();
+    if (body.length < 220) {
+      return body;
+    }
   }
 
   return fallback;

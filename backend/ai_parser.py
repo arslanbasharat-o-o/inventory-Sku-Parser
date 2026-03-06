@@ -157,22 +157,12 @@ def _get_client() -> OpenAI | None:
 # AI structured parser
 # ---------------------------------------------------------------------------
 
-_AI_SYSTEM_PROMPT = """You are an expert mobile phone parts SKU parser.
-Given a raw product title, extract and return structured data.
-
-Rules:
-- brand: Normalised manufacturer code (SAMSUNG/APPLE/GOOGLE/XIAOMI/HUAWEI/etc.)
-- model: Full device model name in UPPERCASE (e.g. GALAXY A52)
-- model_code: Internal model identifier numeric/alpha code (e.g. A525, XT2041)
-- primary_part: Standard abbreviation (CP=charging port, BATT=battery, BC=back camera,
-  FC=front camera, CF=charging flex, ES=ear speaker, LS=loud speaker,
-  VIB=vibration motor, ST=sim tray, FS=fingerprint sensor, etc.)
-- secondary_part: Additional part code if present (HJ=headphone jack, NFC=NFC, etc.)
-- sku: Formatted SKU string built from model + model_code + parts
-- confidence: Your confidence score 0.0-1.0
-- corrections: List of spelling corrections as 'wrong→correct' strings
-- needs_review: true if confidence < 0.75
-- source: always 'ai'"""
+_AI_SYSTEM_PROMPT = """You are a rule-driven mobile phone parts SKU parser.
+You must never invent abbreviations.
+Use only official SKU rule codes from the parser context.
+If a code is missing in rules, set primary_part to UNRESOLVED and sku to NOT_UNDERSTANDABLE.
+All string outputs must be uppercase.
+SKU length must be <= 31 characters including spaces."""
 
 
 def _ai_parse_title(title: str) -> ParsedSKUResult | None:

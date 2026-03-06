@@ -883,6 +883,34 @@ MAX_PARSE_CACHE_SIZE = 400_000
 MULTIPROCESS_ROW_THRESHOLD = 120_000
 MULTIPROCESS_CHUNK_SIZE = 2_000
 
+# Runtime speed controls for noisy global model datasets.
+FILTER_MODEL_DATASET_TO_CORE_BRANDS = os.getenv("SKU_FILTER_MODEL_DATASET", "1") != "0"
+MAX_MODEL_ALIASES_PER_ENTRY = max(8, int(os.getenv("SKU_MAX_MODEL_ALIASES", "24")))
+CORE_SMARTPHONE_BRANDS = {
+    "APPLE",
+    "SAMSUNG",
+    "GOOGLE",
+    "XIAOMI",
+    "REDMI",
+    "POCO",
+    "OPPO",
+    "VIVO",
+    "ONEPLUS",
+    "HUAWEI",
+    "HONOR",
+    "REALME",
+    "MOTOROLA",
+    "NOKIA",
+    "SONY",
+    "LG",
+    "TECNO",
+    "INFINIX",
+    "TCL",
+    "ZTE",
+    "LENOVO",
+    "ASUS",
+}
+
 
 @dataclass
 class EngineConfig:
@@ -2213,6 +2241,44 @@ class SKUIntelligenceEngine:
             model = self.normalize_code(raw_model)
         return model
 
+    def _alias_quality_score(self, alias_norm: str, sku_brand: str, model_for_sku: str) -> int:
+        score = 0
+        if not alias_norm:
+            return score
+        model_norm = self.normalize_phrase(model_for_sku)
+        if alias_norm == model_norm:
+            score += 10_000
+        if sku_brand and alias_norm.startswith(self.normalize_phrase(sku_brand)):
+            score += 300
+        if any(ch.isdigit() for ch in alias_norm):
+            score += 200
+        token_len = len(alias_norm.split())
+        score += token_len * 10
+        score += min(len(alias_norm), 80)
+        return score
+
+    def _is_useful_model_alias(self, alias_norm: str) -> bool:
+        if not alias_norm or len(alias_norm) < 3:
+            return False
+        tokens = alias_norm.split()
+        if not tokens or len(tokens) > 8:
+            return False
+
+        if len(tokens) == 1:
+            token = tokens[0]
+            if token in BRAND_FAMILY_MAP:
+                return False
+            if token in MODEL_STOPWORDS or token in GENERIC_NOISE:
+                return False
+            if token in {"5g", "4g", "pro", "plus", "max", "ultra", "mini", "lite", "fe"}:
+                return False
+            if not any(ch.isdigit() for ch in token):
+                return False
+
+        if all(token in MODEL_STOPWORDS or token in GENERIC_NOISE for token in tokens):
+            return False
+        return True
+
     def _load_device_model_database(self) -> None:
         """Load global smartphone models and build longest-match lookup indexes."""
         self._device_model_exact = {}
@@ -2240,6 +2306,10 @@ class SKUIntelligenceEngine:
             model_raw = str(row.get("model", "")).strip()
             if not dataset_brand or not model_raw:
                 continue
+            if FILTER_MODEL_DATASET_TO_CORE_BRANDS:
+                brand_code = self.normalize_code(dataset_brand)
+                if brand_code and brand_code not in CORE_SMARTPHONE_BRANDS:
+                    continue
 
             sku_brand = self._sku_brand_from_dataset_brand(dataset_brand)
             model_for_sku = self._normalize_model_for_sku(sku_brand, dataset_brand, model_raw)
@@ -2252,15 +2322,29 @@ class SKUIntelligenceEngine:
                 if self.normalize_code(code)
             )
 
-            aliases: set[str] = {str(model_raw)}
+            aliases: set[str] = {str(model_raw), f"{sku_brand} {model_for_sku}".strip(), model_for_sku}
             aliases.update(str(alias) for alias in row.get("aliases", []) if str(alias).strip())
-            aliases.add(f"{sku_brand} {model_for_sku}".strip())
-            aliases.add(model_for_sku)
 
+            ranked_aliases: list[tuple[int, str]] = []
             for alias in aliases:
                 alias_norm = self.normalize_phrase(alias)
-                if not alias_norm or len(alias_norm) < 3:
+                if not self._is_useful_model_alias(alias_norm):
                     continue
+                quality = self._alias_quality_score(alias_norm, sku_brand, model_for_sku)
+                ranked_aliases.append((quality, alias_norm))
+
+            ranked_aliases.sort(key=lambda item: item[0], reverse=True)
+            selected_aliases: list[str] = []
+            selected_set: set[str] = set()
+            for _score, alias_norm in ranked_aliases:
+                if alias_norm in selected_set:
+                    continue
+                selected_set.add(alias_norm)
+                selected_aliases.append(alias_norm)
+                if len(selected_aliases) >= MAX_MODEL_ALIASES_PER_ENTRY:
+                    break
+
+            for alias_norm in selected_aliases:
                 token_len = len(alias_norm.split())
                 if token_len == 0:
                     continue
@@ -2305,6 +2389,12 @@ class SKUIntelligenceEngine:
         tokens = self.tokenize(normalized_title)
         if not tokens:
             return "", "", ""
+        title_token_set = set(tokens)
+        title_digit_tokens = {token for token in tokens if any(ch.isdigit() for ch in token)}
+        network_gen_tokens = {"2g", "3g", "4g", "5g"}
+        title_core_digit_tokens = {
+            token for token in title_digit_tokens if token not in network_gen_tokens
+        }
 
         title_brand_hint = ""
         for token in tokens:
@@ -2349,6 +2439,25 @@ class SKUIntelligenceEngine:
                     entries = self._device_model_exact.get(str(alias), ())
                     if not entries:
                         continue
+                    alias_tokens = str(alias).split()
+                    alias_digit_tokens = [
+                        token for token in alias_tokens if any(ch.isdigit() for ch in token)
+                    ]
+                    alias_core_digit_tokens = [
+                        token for token in alias_digit_tokens if token not in network_gen_tokens
+                    ]
+                    # Guardrail: avoid cross-model fuzzy drift (e.g., A52 -> A56).
+                    if alias_digit_tokens and title_digit_tokens:
+                        if set(alias_digit_tokens).isdisjoint(title_digit_tokens):
+                            continue
+                    elif title_digit_tokens and not alias_digit_tokens:
+                        continue
+                    # Require real model-token alignment, not just shared generational tokens.
+                    if title_core_digit_tokens:
+                        if not alias_core_digit_tokens:
+                            continue
+                        if set(alias_core_digit_tokens).isdisjoint(title_core_digit_tokens):
+                            continue
                     if title_brand_hint:
                         entries = tuple(item for item in entries if item[0] == title_brand_hint)
                         if not entries:

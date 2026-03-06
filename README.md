@@ -41,7 +41,7 @@ python -m backend.app
 
 ### 3) Run FastAPI live analyzer service
 ```bash
-uvicorn backend.fastapi_app:app --host 0.0.0.0 --port 8000 --reload
+uvicorn backend.fastapi_app:app --host 0.0.0.0 --port 5000 --reload
 ```
 
 ### 4) Run Next.js frontend
@@ -49,6 +49,11 @@ uvicorn backend.fastapi_app:app --host 0.0.0.0 --port 8000 --reload
 cd frontend
 npm install
 npm run dev
+```
+
+Optional frontend proxy override:
+```bash
+SKU_BACKEND_URL=http://127.0.0.1:5000 npm run dev
 ```
 
 ## API Endpoints

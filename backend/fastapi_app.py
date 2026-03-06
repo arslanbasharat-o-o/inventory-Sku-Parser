@@ -5,11 +5,14 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import shutil
 import tempfile
+import uuid
 from pathlib import Path
 from typing import Literal
 
+import pandas as pd
 from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
@@ -20,6 +23,8 @@ from .structured_sku_parser import (
     StructuredParseError,
     StructuredSKUParserService,
 )
+from .sku_parser import NOT_UNDERSTANDABLE as LEGACY_NOT_UNDERSTANDABLE
+from .sku_parser import process_inventory as legacy_process_inventory
 from .training_dashboard_service import TrainingDashboardService
 
 LOGGER = logging.getLogger(__name__)
@@ -76,6 +81,7 @@ class BatchPathResponse(BaseModel):
 class CacheStatusResponse(BaseModel):
     cached_entries: int
     ai_enabled: bool
+    ai_provider: str
     ai_model: str
     ai_threshold: float
 
@@ -124,7 +130,18 @@ class LiveTestRequest(BaseModel):
 
 AI_THRESHOLD = float(os.getenv("SKU_AI_THRESHOLD", "0.85"))
 REVIEW_THRESHOLD = float(os.getenv("SKU_REVIEW_THRESHOLD", "0.75"))
-AI_MODEL = os.getenv("OPENAI_STRUCTURED_MODEL", "gpt-5")
+AI_MODEL = (
+    os.getenv("SKU_AI_MODEL")
+    or os.getenv("GEMINI_STRUCTURED_MODEL")
+    or os.getenv("OPENAI_STRUCTURED_MODEL")
+    or "gemini-2.5-flash"
+)
+
+BASE_DIR = Path(__file__).resolve().parent.parent
+UPLOAD_DIR = Path(os.getenv("SKU_UPLOAD_DIR", str(BASE_DIR / "uploads"))).resolve()
+OUTPUT_DIR = Path(os.getenv("SKU_OUTPUT_DIR", str(BASE_DIR / "outputs"))).resolve()
+UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
 PARSER_SERVICE = StructuredSKUParserService(
     ai_model=AI_MODEL,
@@ -140,11 +157,36 @@ TRAINING_SERVICE = TrainingDashboardService(structured_log_db_path=PARSER_SERVIC
 def _refresh_structured_cache() -> None:
     PARSER_SERVICE.clear_cache()
 
+
+def _safe_filename(raw_name: str) -> str:
+    name = Path(raw_name or "inventory.xlsx").name
+    safe = re.sub(r"[^A-Za-z0-9._-]+", "_", name).strip("._")
+    return safe or "inventory.xlsx"
+
+
+def _build_legacy_stats(df: pd.DataFrame) -> dict[str, int | float]:
+    parsed_mask = df.get("Product New SKU", pd.Series(dtype=object)).astype(str).ne(
+        LEGACY_NOT_UNDERSTANDABLE
+    )
+    sku_dup_mask = df.get("SKU Duplicate", pd.Series(dtype=object)).astype(str).eq("DUPLICATED")
+    title_dup_mask = df.get("Title Duplicate", pd.Series(dtype=object)).astype(str).eq("DUPLICATED")
+    total_rows = int(len(df))
+    parsed_rows = int(parsed_mask.sum()) if total_rows else 0
+    parse_rate = round((parsed_rows / total_rows) * 100, 2) if total_rows else 0.0
+    return {
+        "total_rows": total_rows,
+        "parsed_rows": parsed_rows,
+        "unparsed_rows": int(total_rows - parsed_rows),
+        "parse_rate": parse_rate,
+        "sku_duplicates": int(sku_dup_mask.sum()),
+        "title_duplicates": int(title_dup_mask.sum()),
+    }
+
 app = FastAPI(
     title="SKU Parser Analyzer API",
     version="3.0.0",
     description=(
-        "Rule-first SKU parser with OpenAI Responses API structured-output fallback. "
+        "Rule-first SKU parser with Gemini/OpenAI structured-output fallback. "
         "When rule confidence < 0.85, AI structured parsing is used."
     ),
 )
@@ -162,7 +204,8 @@ def healthz() -> dict[str, str]:
     return {
         "status": "ok",
         "service": "sku-parser-analyzer-api",
-        "ai": "enabled" if bool(os.getenv("OPENAI_API_KEY")) else "disabled",
+        "ai": "enabled" if PARSER_SERVICE.ai_enabled else "disabled",
+        "ai_provider": PARSER_SERVICE.ai_provider,
     }
 
 
@@ -185,8 +228,27 @@ def analyze_title_api(payload: AnalyzeTitleRequest) -> AnalyzeTitleResponse:
             product_description=payload.product_description,
         )
     except StructuredParseError:
-        # Required failsafe for invalid structured model output after retry.
-        return JSONResponse(status_code=422, content={"error": "Unable to parse title"})
+        # Graceful fallback: if AI structured output is unavailable/invalid,
+        # return rule-parser output instead of hard-failing the API.
+        try:
+            parsed, parser_reason, correction_pairs_raw = PARSER_SERVICE._run_rule_parser(  # noqa: SLF001
+                title=PARSER_SERVICE.normalize_title(title),
+                product_sku=payload.product_sku,
+                product_web_sku=payload.product_web_sku,
+                product_description=PARSER_SERVICE.normalize_title(payload.product_description),
+            )
+            parse_status: Literal["parsed", "not_understandable"] = (
+                "parsed" if parsed.sku != LEGACY_NOT_UNDERSTANDABLE else "not_understandable"
+            )
+            execution = type("FallbackExecution", (), {})()
+            execution.parsed = parsed
+            execution.parse_status = parse_status
+            execution.parser_reason = f"{parser_reason}+ai_unavailable_fallback"
+            execution.source = "rule"
+            execution.review_required = bool(float(parsed.confidence) < REVIEW_THRESHOLD)
+            execution.correction_pairs = correction_pairs_raw
+        except Exception:
+            return JSONResponse(status_code=422, content={"error": "Unable to parse title"})
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:  # pragma: no cover - runtime safety
@@ -292,12 +354,55 @@ async def analyze_batch(file: UploadFile = File(...)) -> FileResponse:
     )
 
 
+@app.post("/parse-inventory-api")
+async def parse_inventory_api(inventory_file: UploadFile = File(...)) -> dict[str, object]:
+    """Compatibility endpoint used by the existing Next.js bulk parser UI."""
+    suffix = Path(inventory_file.filename or "inventory.xlsx").suffix.lower()
+    if suffix not in {".xlsx", ".xlsm", ".xls", ".csv"}:
+        raise HTTPException(status_code=400, detail="Invalid file type")
+
+    file_id = uuid.uuid4().hex
+    input_name = _safe_filename(inventory_file.filename or "inventory.xlsx")
+    input_path = UPLOAD_DIR / f"{file_id}_{input_name}"
+    output_path = OUTPUT_DIR / f"{file_id}_products_sku_processed.xlsx"
+
+    try:
+        with input_path.open("wb") as out_fp:
+            shutil.copyfileobj(inventory_file.file, out_fp)
+        result_df = legacy_process_inventory(input_path, output_path)
+    except Exception as exc:  # pragma: no cover - runtime safety
+        LOGGER.exception("parse_inventory_api failed")
+        raise HTTPException(status_code=500, detail=f"Processing failed: {exc}") from exc
+
+    preview_df = result_df.fillna("")
+    return {
+        "columns": list(preview_df.columns),
+        "rows": preview_df.to_dict(orient="records"),
+        "stats": _build_legacy_stats(result_df),
+        "download_file": output_path.name,
+    }
+
+
+@app.get("/download/{file_name}", response_class=FileResponse)
+def download_file(file_name: str) -> FileResponse:
+    safe_name = _safe_filename(file_name)
+    file_path = OUTPUT_DIR / safe_name
+    if not file_path.exists():
+        raise HTTPException(status_code=404, detail="Processed file not found")
+    return FileResponse(
+        path=str(file_path),
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        filename="products_sku_processed.xlsx",
+    )
+
+
 @app.get("/cache/status", response_model=CacheStatusResponse)
 def cache_status() -> CacheStatusResponse:
     return CacheStatusResponse(
         cached_entries=PARSER_SERVICE.cache_entry_count(),
-        ai_enabled=bool(os.getenv("OPENAI_API_KEY")),
-        ai_model=AI_MODEL,
+        ai_enabled=PARSER_SERVICE.ai_enabled,
+        ai_provider=PARSER_SERVICE.ai_provider,
+        ai_model=PARSER_SERVICE.ai_model,
         ai_threshold=AI_THRESHOLD,
     )
 

@@ -8,6 +8,11 @@ import { ResultsTable } from "@/components/ResultsTable";
 import { analyzeTitle, parseInventory, downloadProcessedFileUrl } from "@/lib/api";
 import { AnalyzeTitleResponse, ParseResponse } from "@/types";
 import { AlertTriangle, CheckCircle2, Box, Loader2, Clipboard, ClipboardCheck, Sparkles, CircleAlert } from "lucide-react";
+import axios from "axios";
+
+const PARSER_BACKEND_URL =
+  process.env.NEXT_PUBLIC_PARSER_BACKEND_URL?.trim().replace(/\/+$/, "") ||
+  "http://127.0.0.1:5000";
 
 function confidenceMeta(confidence: number) {
   if (confidence >= 0.9) {
@@ -59,7 +64,20 @@ function getApiErrorMessage(
   const status = maybeAxios.response.status;
   const apiError = maybeAxios.response.data?.error ?? maybeAxios.response.data?.detail;
   if (typeof apiError === "string" && apiError.trim()) {
+    if (status && status >= 500 && /internal server error/i.test(apiError.trim())) {
+      if (serviceUrl) {
+        return `Cannot connect to parser backend at ${serviceUrl}. Start or restart the backend server and retry.`;
+      }
+      return "Cannot connect to parser backend. Start or restart the backend server and retry.";
+    }
     return apiError;
+  }
+
+  if (status && status >= 500) {
+    if (serviceUrl) {
+      return `Cannot connect to parser backend at ${serviceUrl}. Start or restart the backend server and retry.`;
+    }
+    return "Cannot connect to parser backend. Start or restart the backend server and retry.";
   }
 
   if (status === 413) {
@@ -85,6 +103,7 @@ export default function Dashboard() {
   const [analysisUpdatedAt, setAnalysisUpdatedAt] = useState<number | null>(null);
   const [isSkuCopied, setIsSkuCopied] = useState(false);
   const latestSingleAnalysisRequestRef = useRef(0);
+  const singleAnalysisAbortRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
     const title = singleTitle.trim();
@@ -103,11 +122,14 @@ export default function Dashboard() {
       latestSingleAnalysisRequestRef.current = requestId;
       setSingleAnalysisError(null);
       setIsAnalyzingSingle(true);
+      singleAnalysisAbortRef.current?.abort();
+      const controller = new AbortController();
+      singleAnalysisAbortRef.current = controller;
 
       try {
         const response = await analyzeTitle({
           title,
-        });
+        }, { signal: controller.signal });
 
         if (latestSingleAnalysisRequestRef.current !== requestId) {
           return;
@@ -117,9 +139,19 @@ export default function Dashboard() {
         setAnalysisUpdatedAt(Date.now());
         setIsSkuCopied(false);
         if (response.parse_status === "not_understandable") {
-          setSingleAnalysisError("Unable to interpret title");
+          const reason = (response.parser_reason || "").trim();
+          if (reason === "display_assembly_filtered") {
+            setSingleAnalysisError("Display assembly titles are filtered and not converted to SKU.");
+          } else if (reason) {
+            setSingleAnalysisError(`Unable to interpret title (${reason}).`);
+          } else {
+            setSingleAnalysisError("Unable to interpret title.");
+          }
         }
       } catch (err) {
+        if (axios.isCancel(err)) {
+          return;
+        }
         if (latestSingleAnalysisRequestRef.current !== requestId) {
           return;
         }
@@ -129,7 +161,7 @@ export default function Dashboard() {
           getApiErrorMessage(
             err,
             "Unable to interpret title",
-            "http://127.0.0.1:5000",
+            PARSER_BACKEND_URL,
           ),
         );
       } finally {
@@ -139,7 +171,10 @@ export default function Dashboard() {
       }
     }, 350);
 
-    return () => window.clearTimeout(timeout);
+    return () => {
+      window.clearTimeout(timeout);
+      singleAnalysisAbortRef.current?.abort();
+    };
   }, [singleTitle]);
 
   // Drag and drop handlers
@@ -203,7 +238,7 @@ export default function Dashboard() {
         getApiErrorMessage(
           err,
           "Parser failed. Please check file format or server status.",
-          "http://127.0.0.1:5000",
+          PARSER_BACKEND_URL,
         ),
       );
     } finally {

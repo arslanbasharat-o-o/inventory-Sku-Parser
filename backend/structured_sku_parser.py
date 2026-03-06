@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Structured SKU parsing service with OpenAI Responses API fallback."""
+"""Structured SKU parsing service with Gemini/OpenAI structured fallback."""
 
 from __future__ import annotations
 
@@ -8,9 +8,13 @@ import json
 import logging
 import os
 import re
+import ssl
 import sqlite3
 import threading
 import time
+import urllib.error
+import urllib.parse
+import urllib.request
 from collections import OrderedDict
 from dataclasses import dataclass
 from pathlib import Path
@@ -19,6 +23,7 @@ from typing import Any, Literal
 import pandas as pd
 from pydantic import BaseModel, Field, ValidationError
 
+from . import sku_parser
 from .sku_parser import NOT_UNDERSTANDABLE, analyze_title as rule_analyze_title
 
 try:
@@ -29,12 +34,43 @@ except Exception:  # pragma: no cover - optional dependency
     OpenAI = None  # type: ignore[assignment]
     OPENAI_AVAILABLE = False
 
+try:
+    import certifi
+
+    CERTIFI_AVAILABLE = True
+except Exception:  # pragma: no cover - optional dependency
+    certifi = None  # type: ignore[assignment]
+    CERTIFI_AVAILABLE = False
+
 
 LOGGER = logging.getLogger(__name__)
 
 RE_MULTI_SPACE = re.compile(r"\s+")
 RE_SEPARATORS = re.compile(r"[-_/]+")
 RE_NON_TITLE_TEXT = re.compile(r"[^A-Za-z0-9\s+]")
+UNRESOLVED_PART = "UNRESOLVED"
+
+
+def _load_project_env_file() -> None:
+    """Load local .env once for local/dev runs without shell exports."""
+    env_path = Path(__file__).resolve().parent.parent / ".env"
+    if not env_path.exists():
+        return
+    try:
+        for raw_line in env_path.read_text(encoding="utf-8").splitlines():
+            line = raw_line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            key, value = line.split("=", 1)
+            key = key.strip()
+            value = value.strip().strip('"').strip("'")
+            if key:
+                os.environ.setdefault(key, value)
+    except Exception:
+        LOGGER.exception("Failed to load .env file from %s", env_path)
+
+
+_load_project_env_file()
 
 
 class ParsedSKUResult(BaseModel):
@@ -63,7 +99,7 @@ class StructuredParseError(RuntimeError):
 
 
 class StructuredSKUParserService:
-    """Rule-first SKU parser with OpenAI structured fallback and caching."""
+    """Rule-first SKU parser with Gemini/OpenAI structured fallback and caching."""
 
     def __init__(
         self,
@@ -75,7 +111,6 @@ class StructuredSKUParserService:
         db_path: str | Path = "outputs/structured_sku_results.db",
         enable_ai: bool = True,
     ) -> None:
-        self.ai_model = ai_model or os.getenv("OPENAI_STRUCTURED_MODEL", "gpt-5")
         self.ai_threshold = float(ai_threshold)
         self.review_threshold = float(review_threshold)
         self.cache_size = int(cache_size)
@@ -86,14 +121,118 @@ class StructuredSKUParserService:
         self.db_path = Path(db_path)
         self._init_db()
 
+        requested_provider = str(os.getenv("SKU_AI_PROVIDER", "auto") or "auto").strip().lower()
+        self._gemini_api_key = str(os.getenv("GEMINI_API_KEY", "")).strip()
+        self._openai_api_key = str(os.getenv("OPENAI_API_KEY", "")).strip()
+        self._gemini_base_url = str(
+            os.getenv("GEMINI_API_BASE_URL", "https://generativelanguage.googleapis.com/v1beta")
+        ).strip().rstrip("/")
+        try:
+            self._gemini_timeout_seconds = float(os.getenv("GEMINI_TIMEOUT_SECONDS", "20"))
+        except ValueError:
+            self._gemini_timeout_seconds = 20.0
+
         self._openai_client: Any | None = None
-        self._ai_enabled = bool(enable_ai)
-        if self._ai_enabled and OPENAI_AVAILABLE and os.getenv("OPENAI_API_KEY"):
+        self._ai_provider: Literal["gemini", "openai", "disabled"] = "disabled"
+        if bool(enable_ai):
+            if requested_provider in {"off", "none", "disabled"}:
+                self._ai_provider = "disabled"
+            elif requested_provider == "gemini":
+                self._ai_provider = "gemini" if self._gemini_api_key else "disabled"
+            elif requested_provider == "openai":
+                self._ai_provider = (
+                    "openai" if OPENAI_AVAILABLE and self._openai_api_key else "disabled"
+                )
+            else:
+                if self._gemini_api_key:
+                    self._ai_provider = "gemini"
+                elif OPENAI_AVAILABLE and self._openai_api_key:
+                    self._ai_provider = "openai"
+
+        if ai_model:
+            self.ai_model = ai_model
+        elif self._ai_provider == "gemini":
+            self.ai_model = os.getenv("GEMINI_STRUCTURED_MODEL", "gemini-2.5-flash")
+        elif self._ai_provider == "openai":
+            self.ai_model = os.getenv("OPENAI_STRUCTURED_MODEL", "gpt-5")
+        else:
+            self.ai_model = os.getenv("GEMINI_STRUCTURED_MODEL", "gemini-2.5-flash")
+
+        self._ai_enabled = self._ai_provider in {"gemini", "openai"}
+        if self._ai_provider == "openai":
             try:
-                self._openai_client = OpenAI()
+                self._openai_client = OpenAI(api_key=self._openai_api_key)
             except Exception:
                 LOGGER.exception("Failed to initialize OpenAI client")
                 self._openai_client = None
+                self._ai_provider = "disabled"
+                self._ai_enabled = False
+
+        self._rule_allowed_codes = self._load_rule_allowed_codes()
+
+    @property
+    def ai_enabled(self) -> bool:
+        return bool(self._ai_enabled)
+
+    @property
+    def ai_provider(self) -> str:
+        return self._ai_provider if self._ai_enabled else "disabled"
+
+    @staticmethod
+    def _normalize_rule_code(value: object) -> str:
+        text = str(value or "").upper().strip()
+        text = re.sub(r"[^A-Z0-9/\-\s]", " ", text)
+        return RE_MULTI_SPACE.sub(" ", text).strip()
+
+    def _load_rule_allowed_codes(self) -> set[str]:
+        codes: set[str] = set()
+        try:
+            engine = sku_parser.get_engine()
+            known_codes = getattr(engine, "known_codes", [])
+            normalize_code = getattr(engine, "normalize_code", None)
+            for code in known_codes:
+                normalized = (
+                    normalize_code(code) if callable(normalize_code) else self._normalize_rule_code(code)
+                )
+                if normalized:
+                    codes.add(str(normalized).strip())
+        except Exception:
+            LOGGER.exception("Failed to load known part codes from rule engine")
+
+        # Safety fallback for essential part codes if engine codes are unavailable.
+        if not codes:
+            codes.update(
+                {
+                    "BATT",
+                    "CP",
+                    "CF",
+                    "HJ",
+                    "FS",
+                    "ES",
+                    "LS",
+                    "ST",
+                    "STD",
+                    "SR",
+                    "SC-R",
+                    "BC",
+                    "FC",
+                    "BCL",
+                    "BDR",
+                    "BACKDOOR",
+                    "VIB",
+                    "PS",
+                    "MIC",
+                    "NFC",
+                    "NFC-CF",
+                }
+            )
+        return codes
+
+    def _is_allowed_rule_code(self, code: str) -> bool:
+        normalized = self._normalize_rule_code(code)
+        if not normalized:
+            return False
+        return normalized in self._rule_allowed_codes
 
     @staticmethod
     def normalize_title(value: object) -> str:
@@ -275,20 +414,173 @@ class StructuredSKUParserService:
         return self._normalize_structured_result(parsed), parser_reason, correction_pairs
 
     def _ai_prompt(self, *, title: str, rule_result: ParsedSKUResult) -> str:
+        allowed_codes = sorted(self._rule_allowed_codes, key=len, reverse=True)
         return (
-            "Parse this mobile repair part title and generate SKU data. "
-            "Return strict schema-compatible values only. "
-            "Use uppercase for brand/model/model_code/part codes, and keep SKU length <= 31 characters.\n"
-            f"Title: {title}\n"
-            f"Rule parser candidate: {rule_result.model_dump_json()}\n"
+            "You are a rule-driven TX Parts SKU parser.\n"
+            "ABSOLUTE RULE: Never invent abbreviations. Use only codes from the official rule list.\n"
+            "If no rule code is available, set primary_part='UNRESOLVED' and sku='"
+            f"{NOT_UNDERSTANDABLE}'.\n"
+            "SKU hard limit: 31 characters including spaces.\n"
+            "Use uppercase for brand/model/model_code/primary_part/secondary_part/sku.\n"
+            "Official allowed rule codes:\n"
+            f"{', '.join(allowed_codes)}\n"
+            "Return ONLY valid JSON matching this exact shape:\n"
+            '{"brand":"","model":"","model_code":"","primary_part":"","secondary_part":null,'
+            '"sku":"","confidence":0.0,"corrections":[]}\n'
             "Field rules:\n"
-            "- primary_part must be the main component code\n"
-            "- secondary_part can be null\n"
-            "- corrections must be short strings such as 'battry->battery'\n"
-            f"- unknown titles should return sku='{NOT_UNDERSTANDABLE}'"
+            "- primary_part must be one allowed rule code OR UNRESOLVED\n"
+            "- secondary_part must be null or one allowed rule code\n"
+            "- corrections entries must look like WRONG->RIGHT\n"
+            "- confidence must be 0..1\n"
+            f"- unknown/ambiguous titles must return sku='{NOT_UNDERSTANDABLE}'\n"
+            "- no markdown, no comments, no extra keys\n"
+            f"Product title: {title}\n"
+            f"Rule parser candidate JSON: {rule_result.model_dump_json()}"
         )
 
-    def _parse_with_ai_once(self, *, title: str, rule_result: ParsedSKUResult) -> ParsedSKUResult | None:
+    def _validate_ai_result(self, parsed: ParsedSKUResult) -> ParsedSKUResult | None:
+        raw_sku = str(parsed.sku or "").upper().strip()
+        if raw_sku and raw_sku != NOT_UNDERSTANDABLE and len(raw_sku) > 31:
+            LOGGER.warning("Rejecting AI result due to SKU length > 31: %s", raw_sku)
+            return None
+
+        normalized = self._normalize_structured_result(parsed)
+        primary_norm = self._normalize_rule_code(normalized.primary_part)
+
+        if primary_norm in {"", UNRESOLVED_PART}:
+            normalized.primary_part = UNRESOLVED_PART
+            normalized.secondary_part = None
+            normalized.sku = NOT_UNDERSTANDABLE
+            normalized.confidence = min(float(normalized.confidence or 0.0), 0.55)
+            return normalized
+
+        if not self._is_allowed_rule_code(normalized.primary_part):
+            LOGGER.warning(
+                "Rejecting AI result due to non-rule primary_part code: %s",
+                normalized.primary_part,
+            )
+            return None
+
+        if normalized.secondary_part and not self._is_allowed_rule_code(normalized.secondary_part):
+            LOGGER.warning(
+                "Rejecting AI result due to non-rule secondary_part code: %s",
+                normalized.secondary_part,
+            )
+            return None
+
+        if normalized.sku != NOT_UNDERSTANDABLE and not normalized.primary_part:
+            LOGGER.warning("Rejecting AI result due to missing primary_part with non-empty SKU")
+            return None
+
+        normalized.confidence = self._confidence_for_ai()
+        return normalized
+
+    @staticmethod
+    def _strip_json_wrappers(text: str) -> str:
+        content = (text or "").strip()
+        if content.startswith("```"):
+            content = re.sub(r"^```(?:json)?\s*", "", content, flags=re.IGNORECASE)
+            content = re.sub(r"\s*```$", "", content).strip()
+        start = content.find("{")
+        end = content.rfind("}")
+        if start != -1 and end != -1 and end > start:
+            return content[start : end + 1]
+        return content
+
+    def _gemini_request_url(self, model_name: str) -> str:
+        clean_model = str(model_name or "").strip()
+        if clean_model.startswith("models/"):
+            clean_model = clean_model.split("/", 1)[1]
+        if not clean_model:
+            clean_model = "gemini-2.5-flash"
+        model_path = urllib.parse.quote(clean_model, safe="")
+        key = urllib.parse.quote(self._gemini_api_key, safe="")
+        return f"{self._gemini_base_url}/models/{model_path}:generateContent?key={key}"
+
+    def _ssl_context(self) -> ssl.SSLContext:
+        if CERTIFI_AVAILABLE:
+            return ssl.create_default_context(cafile=certifi.where())
+        return ssl.create_default_context()
+
+    def _parse_with_gemini_once(self, *, title: str, rule_result: ParsedSKUResult) -> ParsedSKUResult | None:
+        if not self._gemini_api_key:
+            return None
+
+        prompt = self._ai_prompt(title=title, rule_result=rule_result)
+        request_payload = {
+            "contents": [{"parts": [{"text": prompt}]}],
+            "generationConfig": {
+                "temperature": 0,
+                "responseMimeType": "application/json",
+            },
+        }
+        encoded = json.dumps(request_payload).encode("utf-8")
+        model_candidates = [self.ai_model]
+        if "gemini-2.5-flash" not in model_candidates:
+            model_candidates.append("gemini-2.5-flash")
+
+        for model_name in model_candidates:
+            req = urllib.request.Request(
+                self._gemini_request_url(model_name),
+                data=encoded,
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+            try:
+                with urllib.request.urlopen(
+                    req,
+                    timeout=self._gemini_timeout_seconds,
+                    context=self._ssl_context(),
+                ) as response:
+                    response_text = response.read().decode("utf-8", errors="replace")
+            except urllib.error.HTTPError as exc:
+                try:
+                    error_body = exc.read().decode("utf-8", errors="replace")
+                except Exception:
+                    error_body = ""
+                LOGGER.warning(
+                    "Gemini structured parse request failed (model=%s, status=%s): %s",
+                    model_name,
+                    exc.code,
+                    error_body[:220],
+                )
+                continue
+            except Exception:
+                LOGGER.exception("Gemini structured parse request failed (model=%s)", model_name)
+                continue
+
+            try:
+                response_json = json.loads(response_text)
+            except Exception:
+                LOGGER.warning("Gemini returned non-JSON response payload")
+                continue
+
+            text_candidates: list[str] = []
+            for candidate in response_json.get("candidates", []) or []:
+                content = candidate.get("content", {}) if isinstance(candidate, dict) else {}
+                for part in content.get("parts", []) or []:
+                    if isinstance(part, dict) and isinstance(part.get("text"), str):
+                        text_candidates.append(part["text"])
+
+            for candidate_text in text_candidates:
+                normalized_json_text = self._strip_json_wrappers(candidate_text)
+                if not normalized_json_text:
+                    continue
+                try:
+                    candidate_payload = json.loads(normalized_json_text)
+                except Exception:
+                    continue
+                try:
+                    parsed = ParsedSKUResult.model_validate(candidate_payload)
+                except ValidationError:
+                    continue
+                validated = self._validate_ai_result(parsed)
+                if validated is not None:
+                    return validated
+
+        return None
+
+    def _parse_with_openai_once(self, *, title: str, rule_result: ParsedSKUResult) -> ParsedSKUResult | None:
         if self._openai_client is None:
             return None
 
@@ -320,9 +612,16 @@ class StructuredSKUParserService:
             LOGGER.exception("OpenAI output failed ParsedSKUResult validation")
             return None
 
-        parsed = self._normalize_structured_result(parsed)
-        parsed.confidence = self._confidence_for_ai()
-        return parsed
+        return self._validate_ai_result(parsed)
+
+    def _parse_with_ai_once(self, *, title: str, rule_result: ParsedSKUResult) -> ParsedSKUResult | None:
+        if not self._ai_enabled:
+            return None
+        if self._ai_provider == "gemini":
+            return self._parse_with_gemini_once(title=title, rule_result=rule_result)
+        if self._ai_provider == "openai":
+            return self._parse_with_openai_once(title=title, rule_result=rule_result)
+        return None
 
     def _parse_with_ai_retry(self, *, title: str, rule_result: ParsedSKUResult) -> ParsedSKUResult | None:
         first = self._parse_with_ai_once(title=title, rule_result=rule_result)
