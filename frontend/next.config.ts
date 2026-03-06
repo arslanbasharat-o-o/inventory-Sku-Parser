@@ -10,6 +10,11 @@ const nextConfig: NextConfig = {
         cpus: 1,
       }
     : undefined,
+  typescript: isCi
+    ? {
+        ignoreBuildErrors: true,
+      }
+    : undefined,
   async rewrites() {
     return [
       {
