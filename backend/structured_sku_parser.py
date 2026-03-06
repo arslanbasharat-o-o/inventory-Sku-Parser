@@ -19,7 +19,7 @@ from typing import Any, Literal
 import pandas as pd
 from pydantic import BaseModel, Field, ValidationError
 
-from sku_parser import NOT_UNDERSTANDABLE, analyze_title as rule_analyze_title
+from .sku_parser import NOT_UNDERSTANDABLE, analyze_title as rule_analyze_title
 
 try:
     from openai import OpenAI  # type: ignore

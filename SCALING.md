@@ -10,7 +10,7 @@ This project now supports production scaling in two ways:
 - `gunicorn.conf.py`
   - CPU-aware worker auto sizing (`WEB_CONCURRENCY` override supported)
   - thread pool workers (`gthread`) for mixed I/O + CPU requests
-- `app.py`
+- `backend/app.py`
   - `MAX_CONCURRENT_PARSE_JOBS` semaphore to reject overload with `429`
   - `GET /healthz` and `GET /readyz` endpoints
   - configurable shared data path via `SKU_PARSER_DATA_DIR`

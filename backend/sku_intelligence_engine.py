@@ -55,16 +55,57 @@ except Exception:  # pragma: no cover - optional dependency
 NOT_UNDERSTANDABLE = "NOT UNDERSTANDABLE TITLE"
 MAX_SKU_LENGTH = 31
 
-PARTS_ONTOLOGY_FILE = Path("mobile_parts_ontology.json")
-PARTS_DICTIONARY_FILE = Path("mobile_parts_dictionary.json")
-PART_CODE_RULES_FILE = Path("part_code_rules.json")
-LEARNED_TITLE_PATTERNS_FILE = Path("learned_title_patterns.json")
-LEARNED_PARTS_FILE = Path("learned_parts.json")
-LEARNED_PATTERNS_FILE = Path("learned_patterns.json")
-TRAINING_PATTERNS_FILE = Path("training_patterns.json")
-UNKNOWN_LOG_FILE = Path("unknown_parts_log.json")
-SPELLING_CORRECTIONS_FILE = Path("spelling_corrections.json")
-LEARNED_SPELLING_VARIATIONS_FILE = Path("learned_spelling_variations.json")
+PROJECT_ROOT_DIR = Path(__file__).resolve().parent.parent
+DATA_ROOT_DIR = Path(
+    os.getenv("SKU_DATA_DIR", str(PROJECT_ROOT_DIR / "data"))
+).resolve()
+CORE_DATA_DIR = DATA_ROOT_DIR / "core"
+RUNTIME_DATA_DIR = DATA_ROOT_DIR / "runtime"
+
+PARTS_ONTOLOGY_FILE = CORE_DATA_DIR / "mobile_parts_ontology.json"
+PARTS_DICTIONARY_FILE = CORE_DATA_DIR / "mobile_parts_dictionary.json"
+PART_CODE_RULES_FILE = CORE_DATA_DIR / "part_code_rules.json"
+SKU_ONTOLOGY_FILE = CORE_DATA_DIR / "sku_part_ontology.json"
+SPELLING_CORRECTIONS_FILE = CORE_DATA_DIR / "spelling_corrections.json"
+
+COLOR_DATASET_FILE = CORE_DATA_DIR / "color_dataset.json"
+CAMERA_ONTOLOGY_FILE = CORE_DATA_DIR / "camera_ontology.json"
+SPEAKER_ONTOLOGY_FILE = CORE_DATA_DIR / "speaker_ontology.json"
+PHRASE_NORMALIZATION_FILE = CORE_DATA_DIR / "phrase_normalization.json"
+BACKDOOR_PATTERNS_FILE = CORE_DATA_DIR / "backdoor_patterns.json"
+BRAND_DATASET_FILE = CORE_DATA_DIR / "brand_dataset.json"
+PART_ONTOLOGY_DATASET_FILE = CORE_DATA_DIR / "part_ontology.json"
+DEVICE_MODEL_DATABASE_FILE = CORE_DATA_DIR / "device_model_database.json"
+
+LEARNED_TITLE_PATTERNS_FILE = RUNTIME_DATA_DIR / "learned_title_patterns.json"
+LEARNED_PARTS_FILE = RUNTIME_DATA_DIR / "learned_parts.json"
+LEARNED_PATTERNS_FILE = RUNTIME_DATA_DIR / "learned_patterns.json"
+TRAINING_PATTERNS_FILE = RUNTIME_DATA_DIR / "training_patterns.json"
+UNKNOWN_LOG_FILE = RUNTIME_DATA_DIR / "unknown_parts_log.json"
+LEARNED_SPELLING_VARIATIONS_FILE = RUNTIME_DATA_DIR / "learned_spelling_variations.json"
+LEARNED_SKU_CORRECTIONS_FILE = RUNTIME_DATA_DIR / "learned_sku_corrections.json"
+
+# Parts whose SKU includes color as a suffix to avoid duplicates
+COLOR_BEARING_PARTS = {"FS", "ST", "STD", "BDR", "BACK DOOR", "BACKDOOR", "BCL"}
+SKU_VARIANT_TOKENS = {"BRKT", "INT", "FRAME", "ADH", "MESH"}
+BRACKET_KEYWORDS = {"bracket", "holder", "mount"}
+
+DEFAULT_COLOR_CODE_MAP = {
+    "BLACK": "BLK",
+    "WHITE": "WHT",
+    "BLUE": "BLU",
+    "RED": "RED",
+    "GREEN": "GRN",
+    "PURPLE": "PPL",
+    "GOLD": "GLD",
+    "SILVER": "SLV",
+    "GRAY": "GRY",
+    "GRAPHITE": "GPH",
+    "PINK": "PNK",
+    "YELLOW": "YLW",
+    "ORANGE": "ORG",
+    "BROWN": "BRN",
+}
 
 REQUIRED_INPUT_COLUMNS = ("Product Name", "Product SKU", "Product Web SKU")
 
@@ -144,6 +185,18 @@ GENERIC_NOISE = {
     "quality",
 }
 
+PIXEL_TITLE_NOISE = {
+    "google",
+    "for",
+    "replacement",
+    "repair",
+    "repairing",
+    "part",
+    "parts",
+    "compatible",
+    "with",
+}
+
 MODEL_STOPWORDS = {
     "battery",
     "charging",
@@ -155,6 +208,8 @@ MODEL_STOPWORDS = {
     "front",
     "back",
     "rear",
+    "ear",
+    "receiver",
     "lens",
     "speaker",
     "earpiece",
@@ -169,6 +224,7 @@ MODEL_STOPWORDS = {
     "volume",
     "vibration",
     "vibrator",
+    "lift",
     "vib",
     "motor",
     "display",
@@ -187,16 +243,36 @@ MODEL_STOPWORDS = {
     "amoled",
     "incell",
     "frame",
+    "bracket",
+    "holder",
+    "mount",
+    "version",
+    "international",
+    "intl",
+    "internal",
+    "pop",
+    "up",
+    "popup",
+    "steel",
+    "plate",
     "black",
+    "blk",
     "white",
+    "wht",
     "blue",
+    "blu",
     "green",
+    "gr",
     "silver",
+    "sil",
+    "slv",
     "gold",
+    "gld",
     "purple",
     "pink",
     "gray",
     "grey",
+    "gry",
     "single",
     "dual",
     "triple",
@@ -208,19 +284,186 @@ MODEL_STOPWORDS = {
     "ultra",
 }
 
-COLOR_CODES = {
+MODEL_SUFFIX_TOKENS = {
+    "pro",
+    "max",
+    "plus",
+    "ultra",
+    "mini",
+    "lite",
+    "fe",
+    "se",
+    "xl",
+    "neo",
+    "gt",
+}
+
+COLOR_CODES: dict[str, str] = {
     "black": "BLACK",
+    "blk": "BLACK",
     "white": "WHITE",
+    "wht": "WHITE",
     "blue": "BLUE",
+    "blu": "BLUE",
     "green": "GREEN",
+    "gr": "GREEN",
     "silver": "SILVER",
+    "sil": "SILVER",
+    "slv": "SILVER",
     "gold": "GOLD",
+    "gld": "GOLD",
     "purple": "PURPLE",
     "pink": "PINK",
     "red": "RED",
     "gray": "GRAY",
     "grey": "GRAY",
+    "gry": "GRAY",
     "yellow": "YELLOW",
+    "graphite": "GRAPHITE",
+    "midnight": "MIDNIGHT",
+    "starlight": "STARLIGHT",
+    "titanium": "TITANIUM",
+    "coral": "CORAL",
+    "orange": "ORANGE",
+    "brown": "BROWN",
+    "bronze": "BRONZE",
+    "rose": "ROSE",
+    "lavender": "LAVENDER",
+    "teal": "TEAL",
+    "cyan": "CYAN",
+    "indigo": "INDIGO",
+    "violet": "VIOLET",
+    "cream": "CREAM",
+    "beige": "BEIGE",
+    "champagne": "CHAMPAGNE",
+    "burgundy": "BURGUNDY",
+    "maroon": "MAROON",
+    "navy": "NAVY",
+    "aqua": "AQUA",
+    "lime": "LIME",
+    "mint": "MINT",
+    "sage": "SAGE",
+    "copper": "COPPER",
+    "pearl": "PEARL",
+    "ivory": "IVORY",
+    "ultramarine": "ULTRAMARINE",
+}
+
+# Multi-word color synonyms loaded from color_dataset.json (populated at engine init)
+MULTI_WORD_COLOR_SYNONYMS: dict[str, str] = {
+    "midnight black": "MIDNIGHT BLACK",
+    "jet black": "JET BLACK",
+    "matte black": "MATTE BLACK",
+    "onyx black": "ONYX BLACK",
+    "phantom black": "PHANTOM BLACK",
+    "space black": "SPACE BLACK",
+    "ceramic black": "CERAMIC BLACK",
+    "pearl white": "PEARL WHITE",
+    "ceramic white": "CERAMIC WHITE",
+    "glacier white": "GLACIER WHITE",
+    "cloud white": "CLOUD WHITE",
+    "pearl white": "PEARL WHITE",
+    "phantom white": "PHANTOM WHITE",
+    "rose gold": "ROSE GOLD",
+    "space gray": "SPACE GRAY",
+    "space grey": "SPACE GRAY",
+    "sierra blue": "SIERRA BLUE",
+    "pacific blue": "PACIFIC BLUE",
+    "alpine green": "ALPINE GREEN",
+    "deep purple": "DEEP PURPLE",
+    "midnight green": "MIDNIGHT GREEN",
+    "product red": "PRODUCT RED",
+    "natural titanium": "NATURAL TITANIUM",
+    "white titanium": "WHITE TITANIUM",
+    "black titanium": "BLACK TITANIUM",
+    "blue titanium": "BLUE TITANIUM",
+    "desert titanium": "DESERT TITANIUM",
+    "bora purple": "BORA PURPLE",
+    "lime green": "LIME GREEN",
+    "cotton blue": "COTTON BLUE",
+    "cloud blue": "CLOUD BLUE",
+    "cloud mint": "CLOUD MINT",
+    "cloud lavender": "CLOUD LAVENDER",
+    "cloud pink": "CLOUD PINK",
+    "phantom gray": "PHANTOM GRAY",
+    "phantom silver": "PHANTOM SILVER",
+    "prism black": "PRISM BLACK",
+    "prism white": "PRISM WHITE",
+    "prism blue": "PRISM BLUE",
+    "prism green": "PRISM GREEN",
+    "mystic bronze": "MYSTIC BRONZE",
+    "mystic blue": "MYSTIC BLUE",
+    "mystic black": "MYSTIC BLACK",
+    "mystic white": "MYSTIC WHITE",
+    "mystic red": "MYSTIC RED",
+    "mystic silver": "MYSTIC SILVER",
+    "aura glow": "AURA GLOW",
+    "ocean blue": "OCEAN BLUE",
+    "sky blue": "SKY BLUE",
+    "ice blue": "ICE BLUE",
+    "electric blue": "ELECTRIC BLUE",
+    "dark blue": "DARK BLUE",
+    "light blue": "LIGHT BLUE",
+    "royal blue": "ROYAL BLUE",
+    "cobalt blue": "COBALT BLUE",
+    "storm blue": "STORM BLUE",
+    "deep sea blue": "DEEP SEA BLUE",
+    "midnight blue": "MIDNIGHT BLUE",
+    "forest green": "FOREST GREEN",
+    "olive green": "OLIVE GREEN",
+    "jade green": "JADE GREEN",
+    "emerald green": "EMERALD GREEN",
+    "sage green": "SAGE GREEN",
+    "teal green": "TEAL GREEN",
+    "neon green": "NEON GREEN",
+    "flamingo pink": "FLAMINGO PINK",
+    "hot pink": "HOT PINK",
+    "baby pink": "BABY PINK",
+    "dusty pink": "DUSTY PINK",
+    "lavender purple": "LAVENDER PURPLE",
+    "starry black": "STARRY BLACK",
+    "starry blue": "STARRY BLUE",
+    "starry purple": "STARRY PURPLE",
+    "haze violet": "HAZE VIOLET",
+    "haze black": "HAZE BLACK",
+    "terra cotta": "TERRA COTTA",
+    "neon yellow": "NEON YELLOW",
+    "neon pink": "NEON PINK",
+    "awesome white": "AWESOME WHITE",
+    "awesome black": "AWESOME BLACK",
+    "awesome blue": "AWESOME BLUE",
+    "awesome red": "AWESOME RED",
+    "awesome green": "AWESOME GREEN",
+    "awesome orange": "AWESOME ORANGE",
+    "awesome violet": "AWESOME VIOLET",
+    "cream white": "CREAM WHITE",
+    "aura black": "AURA BLACK",
+    "aura white": "AURA WHITE",
+    "aura blue": "AURA BLUE",
+    "monet blue": "MONET BLUE",
+    "monet purple": "MONET PURPLE",
+    "mystic navy": "MYSTIC NAVY",
+    # Google Pixel marketing colors
+    "stormy black": "BLACK",
+    "just black": "BLACK",
+    "obsidian": "BLACK",
+    "charcoal": "BLACK",
+    "sorta black": "BLACK",
+    "oh so orange": "ORANGE",
+    "sorta sunny": "YELLOW",
+    "kinda coral": "CORAL",
+    "quite mint": "MINT",
+    "kinda blue": "BLUE",
+    "sorta seafoam": "GREEN",
+    "not pink": "PINK",
+    "very silver": "SILVER",
+    "clearly white": "WHITE",
+    "snow": "WHITE",
+    "porcelain": "WHITE",
+    "hazel": "GREEN",
+    "bay": "BLUE",
+    "lemongrass": "GREEN",
+    "peony": "PINK",
 }
 
 VARIANT_CODES = {
@@ -243,11 +486,20 @@ VARIANT_CODES = {
 
 PART_PRIORITY_TABLE: dict[str, int] = {
     "BATT": 100,
+    "BAT": 99,
     "CP": 95,
     "CF": 90,
-    "BC": 90,
+    "BC-M": 90,
+    "BC-W": 90,
+    "BC-UW": 90,
+    "BC-MAC": 90,
+    "BC-T": 90,
+    "BC-D": 90,
+    "BC": 88,
     "FC": 90,
     "NFC": 91,
+    "NFC-CF": 91,
+    "WLC": 89,
     "ST": 85,
     "STD": 85,
     "ES": 80,
@@ -260,6 +512,11 @@ PART_PRIORITY_TABLE: dict[str, int] = {
     "PB-F": 65,
     "VOL-F": 65,
     "HJ": 60,
+    "FS": 85,
+    "BCL": 83,
+    "BDR": 78,
+    "MIC": 72,
+    "PS": 70,
 }
 
 AMBIGUOUS_SINGLETON_PHRASES = {
@@ -331,7 +588,18 @@ MANUFACTURER_LABEL_MAP = {
 }
 
 DEFAULT_PART_CODE_RULES: dict[str, str] = {
+    "wireless charging flex": "NFC-CF",
+    "nfc charging flex": "NFC-CF",
+    "wireless nfc flex": "NFC-CF",
+    "wireless nfc charging flex": "NFC-CF",
+    "wireless charging": "WLC",
+    "battery fpc connector": "BAT FPC",
+    "battery connector": "BAT FPC",
+    "battery flex connector": "BAT FPC",
     "power volume flex": "PV-F",
+    "power / volume flex": "PV-F",
+    "power volume cable": "PV-F",
+    "pwr vol flex": "PV-F",
     "power and volume flex": "PV-F",
     "volume and power flex": "PV-F",
     "power + volume flex": "P/V-F",
@@ -341,10 +609,20 @@ DEFAULT_PART_CODE_RULES: dict[str, str] = {
     "camera flex": "CAM-F",
     "mic flex": "MIC-FC",
     "microphone flex": "MIC-FC",
+    "lcd flex": "L-FLEX",
+    "display flex": "L-FLEX",
+    "screen flex": "L-FLEX",
+    "antenna flex": "ANNT-CONN",
+    "antenna cable": "ANNT-CONN",
+    "antenna connecting cable": "ANNT-CONN",
     "mainboard flex cable": "MFC",
+    "mainboard flex": "MFC",
+    "motherboard flex": "MFC",
     "nfc flex": "NFC",
     "wifi antenna": "WIF-ANNT",
     "antenna connector": "ANNT-CONN",
+    "sim card reader": "SC-R",
+    "sim reader": "SC-R",
     "charging port with headphone jack": "CP HJ",
     "charging port board with headphone jack": "CP HJ",
     "sim reader pcb": "SC-R-PCB-SR",
@@ -352,86 +630,217 @@ DEFAULT_PART_CODE_RULES: dict[str, str] = {
     "ear speaker and proximity sensor": "ES-PS",
     "vibration ear speaker": "V/ES",
     "vibration and ear speaker": "V/ES",
+    "vibrator and earpiece": "V/ES",
+    "vibrator & earpiece": "V/ES",
+    "vibrator and ear speaker": "V/ES",
     "lift motor": "LIFT-MOT",
+    "pop up camera motor": "LIFT-MOT",
+    "popup camera motor": "LIFT-MOT",
+    "pop-up camera motor": "LIFT-MOT",
 }
 
 DEFAULT_MOBILE_PARTS_ONTOLOGY: dict[str, str] = {
-    # Requested examples
+    # Battery
     "battery": "BATT",
     "batt": "BATT",
     "battry": "BATT",
     "batery": "BATT",
     "battary": "BATT",
     "bat": "BATT",
+    # Charging port
     "charging port": "CP",
     "charging connector": "CP",
     "charging flex": "CF",
+    "charging board": "CP",
+    "charging socket": "CP",
+    "charge connector": "CP",
+    "charger port": "CP",
+    "usb port": "CP",
+    "usb-c port": "CP",
+    "type c port": "CP",
+    "dock connector": "CP",
+    "lightning port": "CP",
+    "lightning connector": "CP",
+    "charging port flex": "CF",
+    "wireless charging flex": "NFC-CF",
+    "nfc charging flex": "NFC-CF",
+    "wireless nfc flex": "NFC-CF",
+    "wireless nfc charging flex": "NFC-CF",
+    "wireless charging": "WLC",
+    # Speakers - differentiated
+    "ear speaker": "ES",
     "earpiece speaker": "ES",
+    "earpiece": "ES",
+    "ear piece": "ES",
+    "receiver speaker": "ES",
+    "receiver": "ES",
+    "top speaker": "ES",
+    "ear receiver": "ES",
+    "call speaker": "ES",
+    "handset speaker": "ES",
+    "front speaker": "ES",
+    "upper speaker": "ES",
+    "listen speaker": "ES",
+    "in-call speaker": "ES",
+    "ear speaker proximity sensor": "ES-PS",
+    "ear speaker and proximity sensor": "ES-PS",
+    "vibration ear speaker": "V/ES",
+    "vibration and ear speaker": "V/ES",
     "loud speaker": "LS",
-    "back camera": "BC",
+    "loudspeaker": "LS",
+    "bottom speaker": "LS",
+    "external speaker": "LS",
+    "ringer": "LS",
+    "buzzer": "LS",
+    "ringer speaker": "LS",
+    "ringtone speaker": "LS",
+    "music speaker": "LS",
+    "speakerphone": "LS",
+    "speaker phone": "LS",
+    # Cameras - differentiated by type
+    "back camera main": "BC-M",
+    "rear camera main": "BC-M",
+    "back main camera": "BC-M",
+    "primary back camera": "BC-M",
+    "back camera wide": "BC-W",
+    "rear camera wide": "BC-W",
+    "wide back camera": "BC-W",
+    "wide angle back camera": "BC-W",
+    "wide angle camera": "BC-W",
+    "back cam wide": "BC-W",
+    "ultra wide camera": "BC-UW",
+    "ultrawide camera": "BC-UW",
+    "back camera ultra wide": "BC-UW",
+    "rear camera ultra wide": "BC-UW",
+    "back ultrawide camera": "BC-UW",
+    "ultra wide cam": "BC-UW",
+    "macro camera": "BC-MAC",
+    "macro cam": "BC-MAC",
+    "back macro camera": "BC-MAC",
+    "rear macro camera": "BC-MAC",
+    "back camera macro": "BC-MAC",
+    "close up camera": "BC-MAC",
+    "telephoto camera": "BC-T",
+    "telephoto cam": "BC-T",
+    "back telephoto camera": "BC-T",
+    "periscope camera": "BC-T",
+    "zoom camera": "BC-T",
+    "tele camera": "BC-T",
+    "depth camera": "BC-D",
+    "depth cam": "BC-D",
+    "tof camera": "BC-D",
+    "time of flight camera": "BC-D",
+    "bokeh camera": "BC-D",
+    "back camera": "BC-M",
+    "rear camera": "BC-M",
+    "main camera": "BC-M",
+    "back cam": "BC-M",
+    "rear cam": "BC-M",
+    "back camera module": "BC-M",
+    "rear camera module": "BC-M",
+    # Front camera
     "front camera": "FC",
+    "selfie camera": "FC",
+    "front cam": "FC",
+    "selfie cam": "FC",
+    "front facing camera": "FC",
+    "front camera module": "FC",
+    "selfie camera module": "FC",
+    "ffc": "FC",
+    # Camera lens
+    "back camera lens": "BCL",
+    "rear camera lens": "BCL",
     "camera lens": "BCL",
-    "vibrator": "VIB",
+    "camera glass": "BCL",
+    "cam lens": "BCL",
+    # Fingerprint
+    "fingerprint sensor": "FS",
+    "fingerprint scanner": "FS",
+    "fingerprint reader": "FS",
+    "fingerprint": "FS",
+    "touch id": "FS",
+    "fp sensor": "FS",
+    # SIM
     "sim tray": "ST",
+    "sim card tray": "ST",
+    "sim card holder": "ST",
+    "sim holder": "ST",
+    "sim slot": "ST",
     "dual sim tray": "STD",
+    "sim reader": "SC-R",
+    "sim card reader": "SC-R",
+    "sim flex": "SC-R",
+    "sim connector": "SC-R",
+    # Back door
+    "back door": "BDR",
+    "back cover": "BDR",
+    "back glass": "BDR",
+    "rear cover": "BDR",
+    "rear door": "BDR",
+    "battery cover": "BDR",
+    "battery door": "BDR",
+    "back housing": "BDR",
+    "rear housing": "BDR",
+    "back panel": "BDR",
+    "rear panel": "BDR",
+    # Vibrator
+    "vibrator": "VIB",
+    "vibration motor": "VIB",
+    "vibrate motor": "VIB",
+    "haptic motor": "VIB",
+    "haptic engine": "VIB",
+    "taptic engine": "VIB",
+    "linear vibrator": "VIB",
+    "vibrator motor": "VIB",
+    "lift motor": "LIFT-MOT",
+    "pop up camera motor": "LIFT-MOT",
+    "popup camera motor": "LIFT-MOT",
+    "pop-up camera motor": "LIFT-MOT",
+    # Flex cables
+    "vibrator flex": "VB-F",
+    "vibration flex": "VB-F",
+    "loudspeaker flex": "L-FLEX",
+    "lcd flex": "L-FLEX",
+    "display flex": "L-FLEX",
+    "screen flex": "L-FLEX",
     "antenna connector": "ANNT-CONN",
+    "antenna flex": "ANNT-CONN",
     "wifi antenna": "WIF-ANNT",
+    "wi-fi antenna": "WIF-ANNT",
     "power volume flex": "PV-F",
     "power button flex": "PB-F",
     "volume flex": "VOL-F",
     "camera flex": "CAM-F",
     "mic flex": "MIC-FC",
+    "microphone flex": "MIC-FC",
     "mainboard flex cable": "MFC",
+    "mainboard flex": "MFC",
+    "motherboard flex": "MFC",
+    "camera flex cable": "CAM-F",
     "nfc flex": "NFC",
-    # Extended seed coverage
-    "charging board": "CP",
-    "charging socket": "CP",
-    "charge connector": "CP",
-    "charger port": "CP",
-    "charging port flex": "CF",
-    "wireless charging flex": "CF",
-    "wireless nfc charging flex": "NFC CF",
-    "battery connector": "BATT CON",
-    "battery fpc connector": "BATT FPC",
+    # Sensors
+    "proximity sensor": "PS",
+    "proximity flex": "PS",
+    "microphone": "MIC",
+    "mic": "MIC",
+    # Headphone
+    "headphone jack": "HJ",
+    "audio jack": "HJ",
+    "earphone jack": "HJ",
+    "3.5mm jack": "HJ",
+    "aux jack": "HJ",
+    # Other
+    "battery connector": "BAT FPC",
+    "battery fpc connector": "BAT FPC",
+    "battery flex connector": "BAT FPC",
     "display connector flex": "FPC",
     "lcd fpc connector": "FPC",
     "touch connector flex": "FPC",
     "fpc connector": "FPC",
-    "sim reader": "SC-R",
-    "sim card tray": "ST",
-    "single sim tray": "ST",
-    "ear speaker": "ES",
-    "ear speaker proximity sensor": "ES-PS",
-    "ear speaker and proximity sensor": "ES-PS",
-    "vibration ear speaker": "V/ES",
-    "vibration and ear speaker": "V/ES",
-    "receiver speaker": "ES",
-    "loudspeaker": "LS",
-    "back camera lens": "BCL",
-    "rear camera lens": "BCL",
-    "rear camera": "BC",
-    "main camera": "BC",
-    "selfie camera": "FC",
-    "front cam": "FC",
-    "vibration motor": "VIB",
-    "vibrator motor": "VIB",
-    "lift motor": "LIFT-MOT",
-    "vibrator flex": "VB-F",
-    "vibration flex": "VB-F",
-    "loudspeaker flex": "L-FLEX",
-    "headphone jack": "HJ",
-    "audio jack": "HJ",
-    "earphone jack": "HJ",
-    "proximity sensor": "PS",
-    "proximity flex": "PS",
     "flashlight flex": "FLF",
-    "fingerprint sensor": "FS",
-    "fingerprint": "FR",
-    "antenna cable": "ANT CON",
-    "antenna connector cable": "ANT CON",
-    "antenna connecting cable": "ANT CON",
-    "back cover": "BACK DOOR",
-    "back door": "BACK DOOR",
+    "antenna cable": "ANNT-CONN",
+    "antenna connector cable": "ANNT-CONN",
+    "antenna connecting cable": "ANNT-CONN",
 }
 
 # Backward-compatible dictionary exposed to existing modules.
@@ -455,8 +864,9 @@ SEMANTIC_TOKEN_HINTS = {
     "tray": "ST",
     "vibration": "VIB",
     "vibrator": "VIB",
-    "antenna": "ANT CON",
+    "antenna": "ANNT-CONN",
     "nfc": "NFC",
+    "wireless": "WLC",
 }
 
 RE_SEPARATOR = re.compile(r"[_\-/]+")
@@ -486,6 +896,7 @@ class EngineConfig:
     training_patterns_file: Path = TRAINING_PATTERNS_FILE
     spelling_corrections_file: Path = SPELLING_CORRECTIONS_FILE
     learned_spelling_variations_file: Path = LEARNED_SPELLING_VARIATIONS_FILE
+    learned_sku_corrections_file: Path = LEARNED_SKU_CORRECTIONS_FILE
     max_sku_length: int = MAX_SKU_LENGTH
     unknown_promotion_threshold: int = 3
     spelling_promotion_threshold: int = 3
@@ -604,6 +1015,27 @@ class SKUIntelligenceEngine:
         self.ontology = self._load_ontology()
         self.learned_patterns = self._load_learned_patterns()
         self.part_dictionary = self._build_part_dictionary()
+        self.sku_ontology: dict[str, str] = {}
+        self.sku_color_codes: dict[str, str] = {}
+        self.part_code_aliases: dict[str, str] = {}
+        self._compress_color_codes = False
+        self.sku_overrides: dict[str, str] = {}
+        self.title_sku_overrides: dict[str, str] = {}
+        self._device_model_exact: dict[str, list[tuple[str, str, tuple[str, ...], int, int]]] = {}
+        self._device_model_alias_index: dict[str, tuple[str, ...]] = {}
+        self._device_model_max_tokens = 0
+
+        # --- Load new production datasets ---
+        self._color_synonym_items: list[tuple[str, str]] = []
+        self._load_color_dataset()      # Expands COLOR_CODES + MULTI_WORD_COLOR_SYNONYMS
+        self._load_camera_ontology()    # Injects BC-M/BC-W/BC-UW/BC-MAC/BC-T/BC-D into ontology
+        self._load_speaker_ontology()   # Injects ES/LS patterns
+        self._load_phrase_normalization()  # Adds phrase aliases to spelling_corrections
+        self._load_backdoor_patterns()  # Injects BDR patterns
+        self._load_brand_dataset()      # Expands BRAND_FAMILY_MAP with aliases
+        self._load_device_model_database()  # Longest-match model detection index
+        self.load_sku_ontology()  # Ontology is the part-code source of truth when provided.
+        # Rebuild phrase item lists after new datasets injected
         self.ontology_items = self._build_phrase_items(self.ontology)
         self.learned_pattern_items = self._build_phrase_items(self.learned_patterns)
 
@@ -627,6 +1059,7 @@ class SKUIntelligenceEngine:
             enabled=self.config.enable_vector_layer,
         )
         self._rebuild_vector_index()
+        self.sku_overrides, self.title_sku_overrides = self._load_sku_corrections()
 
     def _ensure_runtime_files(self) -> None:
         self._ensure_json_dict_file(self.config.ontology_file, DEFAULT_MOBILE_PARTS_ONTOLOGY)
@@ -639,15 +1072,27 @@ class SKUIntelligenceEngine:
         self._ensure_json_dict_file(self.config.training_patterns_file, {})
         self._ensure_json_dict_file(self.config.spelling_corrections_file, DEFAULT_SPELLING_CORRECTIONS)
         self._ensure_json_dict_file(self.config.learned_spelling_variations_file, {})
+        self._ensure_json_object_file(
+            self.config.learned_sku_corrections_file,
+            {"sku_overrides": {}, "title_overrides": {}},
+        )
 
     def _ensure_json_dict_file(self, file_path: Path, seed: dict[str, str]) -> None:
         if file_path.exists():
             return
+        file_path.parent.mkdir(parents=True, exist_ok=True)
         file_path.write_text(json.dumps(seed, indent=2, ensure_ascii=True), encoding="utf-8")
 
     def _ensure_json_list_file(self, file_path: Path, seed: list[dict[str, object]]) -> None:
         if file_path.exists():
             return
+        file_path.parent.mkdir(parents=True, exist_ok=True)
+        file_path.write_text(json.dumps(seed, indent=2, ensure_ascii=True), encoding="utf-8")
+
+    def _ensure_json_object_file(self, file_path: Path, seed: object) -> None:
+        if file_path.exists():
+            return
+        file_path.parent.mkdir(parents=True, exist_ok=True)
         file_path.write_text(json.dumps(seed, indent=2, ensure_ascii=True), encoding="utf-8")
 
     def _load_json_dict(self, file_path: Path) -> dict[str, str]:
@@ -675,12 +1120,111 @@ class SKUIntelligenceEngine:
         return [row for row in data if isinstance(row, dict)]
 
     def _write_json(self, file_path: Path, payload: object) -> None:
+        file_path.parent.mkdir(parents=True, exist_ok=True)
         file_path.write_text(json.dumps(payload, indent=2, ensure_ascii=True), encoding="utf-8")
+
+    def _load_sku_corrections(self) -> tuple[dict[str, str], dict[str, str]]:
+        try:
+            payload = json.loads(self.config.learned_sku_corrections_file.read_text(encoding="utf-8"))
+        except Exception:
+            return {}, {}
+        if not isinstance(payload, dict):
+            return {}, {}
+
+        raw_sku_overrides = payload.get("sku_overrides", {})
+        raw_title_overrides = payload.get("title_overrides", {})
+        if not isinstance(raw_sku_overrides, dict):
+            raw_sku_overrides = {}
+        if not isinstance(raw_title_overrides, dict):
+            raw_title_overrides = {}
+
+        sku_overrides: dict[str, str] = {}
+        title_overrides: dict[str, str] = {}
+
+        for source, target in raw_sku_overrides.items():
+            source_sku = self.normalize_code(source)
+            target_sku = self._trim_sku(self.normalize_code(target))
+            if source_sku and target_sku:
+                sku_overrides[source_sku] = target_sku
+
+        for source, target in raw_title_overrides.items():
+            title_key = self.normalize_phrase(source)
+            target_sku = self._trim_sku(self.normalize_code(target))
+            if title_key and target_sku:
+                title_overrides[title_key] = target_sku
+
+        return sku_overrides, title_overrides
+
+    def _apply_sku_corrections(self, sku: str, title_text: str) -> tuple[str, bool]:
+        normalized_sku = self.normalize_code(sku)
+        if not normalized_sku:
+            return sku, False
+
+        title_key = self.normalize_phrase(title_text)
+        if title_key:
+            corrected = self.title_sku_overrides.get(title_key, "")
+            if corrected:
+                return corrected, True
+
+        corrected = self.sku_overrides.get(normalized_sku, "")
+        if corrected:
+            return corrected, True
+        return normalized_sku, False
+
+    def reload_runtime_resources(self) -> None:
+        """Reload parser datasets and rebuild in-memory indexes."""
+        self._ensure_runtime_files()
+        self._spelling_variation_counter.clear()
+        self.spelling_corrections = self._load_spelling_corrections()
+        self.part_rules = self._load_part_rules()
+        self.ontology = self._load_ontology()
+        self.learned_patterns = self._load_learned_patterns()
+        self.part_dictionary = self._build_part_dictionary()
+        self.sku_ontology = {}
+        self.sku_color_codes = {}
+        self.part_code_aliases = {}
+        self._compress_color_codes = False
+
+        self._load_color_dataset()
+        self._load_camera_ontology()
+        self._load_speaker_ontology()
+        self._load_phrase_normalization()
+        self._load_backdoor_patterns()
+        self._load_brand_dataset()
+        self._load_device_model_database()
+        self.load_sku_ontology()
+
+        self.ontology_items = self._build_phrase_items(self.ontology)
+        self.learned_pattern_items = self._build_phrase_items(self.learned_patterns)
+        self.part_rule_items = self._build_phrase_items(self.part_rules)
+        self.part_items = self._build_phrase_items(self.part_dictionary)
+        self.part_phrase_list = [phrase for phrase, _code in self.part_items]
+        self.known_codes = sorted(
+            {code for _phrase, code in self.part_items},
+            key=len,
+            reverse=True,
+        )
+        self._component_vocab = self._build_component_vocabulary()
+        self._component_vocab_list = tuple(sorted(self._component_vocab))
+        self._rebuild_phonetic_indexes()
+        self._rebuild_vector_index()
+        self.sku_overrides, self.title_sku_overrides = self._load_sku_corrections()
+        self._correct_token_cached.cache_clear()
+        self._parse_cached.cache_clear()
 
     def _canonicalize_part_code(self, code: str) -> str:
         normalized = self.normalize_code(code)
         if not normalized:
             return ""
+        alias_map = getattr(self, "part_code_aliases", {})
+        if alias_map:
+            normalized = alias_map.get(normalized, normalized)
+        if normalized in {"BACK", "DOOR"}:
+            return ""
+        if normalized in {"BACK DOOR", "BACKDOOR"}:
+            return "BDR"
+        if normalized == "BAT FPC" or normalized.startswith("BAT FPC "):
+            return normalized
         if normalized == "BAT":
             return "BATT"
         if normalized.startswith("BAT "):
@@ -731,6 +1275,217 @@ class SKUIntelligenceEngine:
             for phrase, code in merged.items()
             if self.normalize_phrase(phrase) and self._canonicalize_part_code(code)
         }
+
+    def _extract_color_code_map(self, payload: dict[str, object]) -> dict[str, str]:
+        color_map: dict[str, str] = {}
+        for key in ("color_code_map", "color_codes", "colors"):
+            raw = payload.get(key)
+            if not isinstance(raw, dict):
+                continue
+            for color_key, code_value in raw.items():
+                left = self.normalize_code(color_key)
+                right = self.normalize_code(code_value)
+                if not left or not right:
+                    continue
+                # Support both COLOR->CODE and CODE->COLOR style payloads.
+                if len(left) <= 4 and len(right) > len(left):
+                    color_map[right] = left
+                else:
+                    color_map[left] = right
+        return color_map
+
+    def _extract_sku_ontology_mappings(
+        self,
+        payload: dict[str, object],
+    ) -> tuple[dict[str, str], dict[str, str], dict[str, str]]:
+        phrase_map: dict[str, str] = {}
+        color_code_map = self._extract_color_code_map(payload)
+        code_aliases: dict[str, str] = {}
+
+        def add_phrase(phrase_value: object, code_value: object) -> None:
+            phrase = self.normalize_phrase(phrase_value)
+            code = self._canonicalize_part_code(code_value)
+            if phrase and code:
+                phrase_map[phrase] = code
+
+        part_code_map = payload.get("part_code_map", {})
+        if isinstance(part_code_map, dict):
+            for part_name, part_code in part_code_map.items():
+                add_phrase(part_name, part_code)
+                normalized_name = self.normalize_code(part_name)
+                normalized_code = self._canonicalize_part_code(part_code)
+                if normalized_name and normalized_code:
+                    # Legacy abbreviations remapped to ontology-defined code.
+                    if normalized_name == "SIM READER":
+                        code_aliases.setdefault("SR", normalized_code)
+                        code_aliases.setdefault("SC-R", normalized_code)
+                    elif normalized_name == "MAINBOARD FLEX":
+                        code_aliases.setdefault("MFC", normalized_code)
+                        code_aliases.setdefault("MB-FC", normalized_code)
+                    elif normalized_name == "LCD FLEX":
+                        code_aliases.setdefault("L-FLEX", normalized_code)
+                        code_aliases.setdefault("LCD-F", normalized_code)
+                    elif normalized_name == "MICROPHONE FLEX":
+                        code_aliases.setdefault("MIC-FC", normalized_code)
+                    elif normalized_name == "NFC FLEX":
+                        code_aliases.setdefault("NFC", normalized_code)
+
+        part_aliases = payload.get("part_aliases", {})
+        if isinstance(part_aliases, dict):
+            for semantic_name, aliases in part_aliases.items():
+                semantic_norm = self.normalize_code(semantic_name)
+                mapped_code = ""
+                if isinstance(part_code_map, dict):
+                    raw_code = part_code_map.get(semantic_name, "")
+                    mapped_code = self._canonicalize_part_code(raw_code)
+                if not mapped_code and semantic_norm:
+                    mapped_code = self._canonicalize_part_code(semantic_norm)
+                if not mapped_code or not isinstance(aliases, list):
+                    continue
+                add_phrase(semantic_name, mapped_code)
+                for alias in aliases:
+                    add_phrase(alias, mapped_code)
+
+        use_existing_parts = not (
+            (isinstance(part_code_map, dict) and part_code_map)
+            or (isinstance(part_aliases, dict) and part_aliases)
+        )
+        existing_parts = payload.get("existing_ontology", {})
+        if use_existing_parts and isinstance(existing_parts, dict):
+            parts_section = existing_parts.get("parts", {})
+            if isinstance(parts_section, dict):
+                for code_value, info in parts_section.items():
+                    code = self._canonicalize_part_code(code_value)
+                    if not code or not isinstance(info, dict):
+                        continue
+                    label = info.get("label")
+                    if isinstance(label, str):
+                        add_phrase(label, code)
+                    phrases = info.get("detection_phrases", [])
+                    if isinstance(phrases, list):
+                        for phrase in phrases:
+                            add_phrase(phrase, code)
+
+        # Support flat phrase->code JSON shape.
+        if not phrase_map:
+            for phrase, code in payload.items():
+                if isinstance(code, str) and phrase not in {
+                    "dataset",
+                    "generated_at",
+                    "part_code_map",
+                    "part_aliases",
+                    "existing_ontology",
+                    "color_code_map",
+                    "color_codes",
+                    "colors",
+                    "code_aliases",
+                    "abbreviation_replacements",
+                    "code_replacements",
+                }:
+                    add_phrase(phrase, code)
+
+        for key in ("code_aliases", "abbreviation_replacements", "code_replacements"):
+            raw_aliases = payload.get(key)
+            if not isinstance(raw_aliases, dict):
+                continue
+            for alias_code, canonical_code in raw_aliases.items():
+                alias_norm = self.normalize_code(alias_code)
+                canonical_norm = self._canonicalize_part_code(canonical_code)
+                if alias_norm and canonical_norm:
+                    code_aliases[alias_norm] = canonical_norm
+
+        # Composite detection defaults for common catalog wording.
+        for phrase in (
+            "wireless nfc charging flex",
+            "wireless charging flex",
+            "nfc charging flex",
+            "wireless nfc flex",
+        ):
+            phrase_norm = self.normalize_phrase(phrase)
+            if phrase_norm and phrase_norm not in phrase_map:
+                phrase_map[phrase_norm] = "NFC-CF"
+        for phrase in ("vibrator & earpiece", "vibrator and earpiece"):
+            phrase_norm = self.normalize_phrase(phrase)
+            if phrase_norm and phrase_norm not in phrase_map:
+                phrase_map[phrase_norm] = "V/ES"
+
+        return phrase_map, color_code_map, code_aliases
+
+    def load_sku_ontology(self, ontology_file: Path | str | None = None) -> dict[str, str]:
+        file_path: Path
+        if ontology_file is None:
+            if SKU_ONTOLOGY_FILE.exists():
+                file_path = SKU_ONTOLOGY_FILE
+            else:
+                file_path = PART_ONTOLOGY_DATASET_FILE
+        else:
+            file_path = Path(ontology_file)
+
+        if not file_path.exists():
+            return {}
+
+        try:
+            payload = json.loads(file_path.read_text(encoding="utf-8"))
+        except Exception:
+            return {}
+        if not isinstance(payload, dict):
+            return {}
+
+        phrase_map, color_code_map, code_aliases = self._extract_sku_ontology_mappings(payload)
+        if not phrase_map and not color_code_map and not code_aliases:
+            return {}
+
+        if code_aliases:
+            self.part_code_aliases.update(code_aliases)
+
+        if color_code_map:
+            self.sku_color_codes.update(color_code_map)
+            self._compress_color_codes = True
+        elif phrase_map:
+            # Enable compressed color output once an ontology is loaded; falls
+            # back to default color compression map when explicit codes are absent.
+            self._compress_color_codes = True
+
+        for phrase, code in phrase_map.items():
+            normalized_phrase = self.normalize_phrase(phrase)
+            normalized_code = self._canonicalize_part_code(code)
+            if not normalized_phrase or not normalized_code:
+                continue
+            self.sku_ontology[normalized_phrase] = normalized_code
+            # Ontology is authoritative for phrase -> code mapping.
+            self.part_rules[normalized_phrase] = normalized_code
+            self.ontology[normalized_phrase] = normalized_code
+            self.part_dictionary[normalized_phrase] = normalized_code
+
+        # If called after the engine has already built indexes, refresh them.
+        if hasattr(self, "part_rule_items"):
+            self.part_rule_items = self._build_phrase_items(self.part_rules)
+            self.ontology_items = self._build_phrase_items(self.ontology)
+            self.part_items = self._build_phrase_items(self.part_dictionary)
+            self.part_phrase_list = [phrase for phrase, _code in self.part_items]
+            self.known_codes = sorted(
+                {code for _phrase, code in self.part_items},
+                key=len,
+                reverse=True,
+            )
+            self._component_vocab = self._build_component_vocabulary()
+            self._component_vocab_list = tuple(sorted(self._component_vocab))
+            self._rebuild_phonetic_indexes()
+            self._correct_token_cached.cache_clear()
+            self._parse_cached.cache_clear()
+
+        return dict(self.sku_ontology)
+
+    def _lookup_ontology_code(self, phrases: tuple[str, ...], fallback: str = "") -> str:
+        for phrase in phrases:
+            key = self.normalize_phrase(phrase)
+            if not key:
+                continue
+            for mapping in (self.sku_ontology, self.part_rules, self.ontology, self.part_dictionary):
+                value = mapping.get(key, "")
+                if value:
+                    return self._canonicalize_part_code(value)
+        return self._canonicalize_part_code(fallback)
 
     def _load_learned_patterns(self) -> dict[str, str]:
         merged: dict[str, str] = {}
@@ -1055,6 +1810,81 @@ class SKUIntelligenceEngine:
             return False
         return f" {phrase} " in f" {text} "
 
+    def _normalize_pixel_title(self, normalized_title: str) -> str:
+        """Remove common Pixel supplier noise words while preserving part/model tokens."""
+        if "pixel" not in normalized_title and "google" not in normalized_title:
+            return normalized_title
+        tokens = self.tokenize(normalized_title)
+        if not tokens:
+            return normalized_title
+
+        cleaned: list[str] = []
+        for token in tokens:
+            if token in PIXEL_TITLE_NOISE:
+                continue
+            cleaned.append(token)
+        return " ".join(cleaned).strip() or normalized_title
+
+    @staticmethod
+    def _parse_pixel_model_entry(segment: str) -> str:
+        text = RE_MULTI_SPACE.sub(" ", segment.lower()).strip()
+        if not text:
+            return ""
+        text = re.sub(r"\bpixel\b", "", text).strip()
+        text = re.sub(r"[^a-z0-9\s]", " ", text)
+        text = RE_MULTI_SPACE.sub(" ", text).strip()
+        if not text:
+            return ""
+
+        m = re.match(r"^(?P<num>\d{1,2})(?:\s*(?P<suffix>a|pro))?\b", text)
+        if not m:
+            return ""
+        number = m.group("num")
+        suffix = (m.group("suffix") or "").lower()
+        if suffix == "a":
+            return f"{number}A"
+        if suffix == "pro":
+            return f"{number}PRO"
+        return number
+
+    def _detect_pixel_compatibility_group(self, raw_title: str) -> str:
+        """Extract Pixel compatibility model groups from slash/comma-separated titles."""
+        if not raw_title:
+            return ""
+        lowered = str(raw_title).lower()
+        if "pixel" not in lowered:
+            return ""
+        if "/" not in lowered and "," not in lowered:
+            return ""
+
+        # Keep separators used by compatibility lists.
+        cleaned = re.sub(r"[^a-z0-9/,\s]", " ", lowered)
+        cleaned = RE_MULTI_SPACE.sub(" ", cleaned).strip()
+        if "pixel" not in cleaned:
+            return ""
+
+        if "pixel" in cleaned:
+            cleaned = cleaned.split("pixel", 1)[1].strip()
+
+        split_segments = re.split(r"[/,]", cleaned)
+        entries: list[str] = []
+        for idx, segment in enumerate(split_segments):
+            candidate = segment.strip()
+            if not candidate:
+                continue
+            parsed = self._parse_pixel_model_entry(candidate)
+            if not parsed and idx > 0:
+                # Follow-up segments like "pro" can complete previous numeric model.
+                parsed = self._parse_pixel_model_entry(f"{entries[-1] if entries else ''} {candidate}")
+            if not parsed:
+                continue
+            if parsed not in entries:
+                entries.append(parsed)
+
+        if len(entries) < 2:
+            return ""
+        return "/".join(entries)
+
     def _should_filter_display_assembly(self, normalized_title: str) -> bool:
         if not normalized_title:
             return False
@@ -1067,10 +1897,16 @@ class SKUIntelligenceEngine:
                 return True
         return False
 
-    def _detect_brand_model(self, normalized_title: str) -> tuple[str, str]:
+    def _detect_brand_model(self, normalized_title: str) -> tuple[str, str, str]:
+        dataset_brand, dataset_model, dataset_model_code = self._detect_brand_model_from_dataset(
+            normalized_title
+        )
+        if dataset_brand and dataset_model:
+            return dataset_brand, dataset_model, dataset_model_code
+
         tokens = self.tokenize(normalized_title)
         if not tokens:
-            return "", ""
+            return "", "", ""
 
         brand = ""
         brand_idx = -1
@@ -1083,6 +1919,11 @@ class SKUIntelligenceEngine:
         model_tokens: list[str] = []
         search_tokens = tokens[brand_idx + 1 :] if brand_idx >= 0 else tokens
         for token in search_tokens:
+            if model_tokens and token in MODEL_SUFFIX_TOKENS:
+                model_tokens.append(token)
+                if len(model_tokens) >= 4:
+                    break
+                continue
             if token in MODEL_STOPWORDS or token in GENERIC_NOISE:
                 if model_tokens:
                     break
@@ -1093,19 +1934,19 @@ class SKUIntelligenceEngine:
                 continue
             if re.fullmatch(r"\d{1,4}", token) or re.fullmatch(r"[a-z]?\d{1,4}[a-z]?", token):
                 model_tokens.append(token)
-                if len(model_tokens) >= 2:
+                if len(model_tokens) >= 4:
                     break
                 continue
             if re.fullmatch(r"[a-z]{1,6}", token):
                 model_tokens.append(token)
-                if len(model_tokens) >= 3:
+                if len(model_tokens) >= 4:
                     break
                 continue
             if model_tokens:
                 break
 
         model = " ".join(token.upper() for token in model_tokens)
-        return brand, model
+        return brand, model, ""
 
     def _extract_model_code(self, raw_title: str, model: str = "") -> str:
         if not raw_title:
@@ -1146,10 +1987,22 @@ class SKUIntelligenceEngine:
         tokens = self.tokenize(normalized_title)
 
         out: list[str] = []
+        if self._detect_bracket_variant(normalized_title):
+            out.append("BRKT")
+        if self._detect_international_version(normalized_title):
+            out.append("INT")
+
         if RE_WITHOUT_FRAME.search(normalized_title):
             out.append("NF")
         elif RE_WITH_FRAME.search(normalized_title):
             out.append("WF")
+
+        if self._detect_frame_variant(normalized_title):
+            out.append("FRAME")
+        if self._detect_adhesive_variant(normalized_title):
+            out.append("ADH")
+        if self._detect_mesh_variant(normalized_title):
+            out.append("MESH")
 
         for phrase, code in VARIANT_CODES.items():
             if " " in phrase and f" {phrase} " in padded and code not in out:
@@ -1160,14 +2013,394 @@ class SKUIntelligenceEngine:
             if code and code not in out:
                 out.append(code)
 
-        return " ".join(out[:2])
+        return " ".join(out[:3])
 
-    def _detect_color(self, normalized_title: str) -> str:
+    def _detect_frame_variant(self, normalized_title: str) -> bool:
+        padded = f" {normalized_title} "
+        if RE_WITH_FRAME.search(normalized_title) or RE_WITHOUT_FRAME.search(normalized_title):
+            return False
+        return " frame " in padded
+
+    def _detect_adhesive_variant(self, normalized_title: str) -> bool:
+        padded = f" {normalized_title} "
+        return any(
+            phrase in padded
+            for phrase in (
+                " adhesive ",
+                " adh ",
+                " glue ",
+                " sticker ",
+                " tape ",
+            )
+        )
+
+    def _detect_mesh_variant(self, normalized_title: str) -> bool:
+        padded = f" {normalized_title} "
+        return any(
+            phrase in padded
+            for phrase in (
+                " mesh ",
+                " grill ",
+                " grille ",
+                " net ",
+            )
+        )
+
+    def _detect_bracket_variant(self, normalized_title: str) -> bool:
+        padded = f" {normalized_title} "
+        if " sim holder " in padded:
+            return False
+        return any(f" {keyword} " in padded for keyword in BRACKET_KEYWORDS)
+
+    def _detect_international_version(self, normalized_title: str) -> bool:
+        padded = f" {normalized_title} "
+        if " international version " in padded:
+            return True
+        if " internal version " in padded:
+            return True
+        if " intl version " in padded or " int l version " in padded:
+            return True
+        if " international " in padded and " version " in padded:
+            return True
+        if " intl " in padded and " version " in padded:
+            return True
+        return False
+
+    def _load_color_dataset(self) -> None:
+        """Load extended color synonyms from color_dataset.json and merge into MULTI_WORD_COLOR_SYNONYMS."""
+        try:
+            data = json.loads(COLOR_DATASET_FILE.read_text(encoding="utf-8"))
+            if isinstance(data, dict):
+                synonyms = data.get("synonyms", {})
+                if isinstance(synonyms, dict):
+                    for k, v in synonyms.items():
+                        key = k.strip().lower()
+                        val = str(v).strip().upper()
+                        if key and val:
+                            MULTI_WORD_COLOR_SYNONYMS[key] = val
+                            if " " not in key:
+                                COLOR_CODES[key] = val
+        except Exception:
+            pass
+        # Sort by phrase length descending so longest match wins
+        self._color_synonym_items: list[tuple[str, str]] = sorted(
+            MULTI_WORD_COLOR_SYNONYMS.items(), key=lambda x: len(x[0]), reverse=True
+        )
+
+    def _load_camera_ontology(self) -> None:
+        """Load camera type patterns from camera_ontology.json and inject into part dictionary."""
+        try:
+            data = json.loads(CAMERA_ONTOLOGY_FILE.read_text(encoding="utf-8"))
+            if isinstance(data, dict):
+                camera_types = data.get("camera_types", {})
+                for code, info in camera_types.items():
+                    if not isinstance(info, dict):
+                        continue
+                    patterns = info.get("patterns", [])
+                    for phrase in patterns:
+                        if isinstance(phrase, str) and phrase.strip():
+                            norm = self.normalize_phrase(phrase)
+                            if norm:
+                                self.ontology[norm] = code
+                                self.part_dictionary[norm] = code
+        except Exception:
+            pass
+
+    def _load_speaker_ontology(self) -> None:
+        """Load speaker type patterns from speaker_ontology.json."""
+        try:
+            data = json.loads(SPEAKER_ONTOLOGY_FILE.read_text(encoding="utf-8"))
+            if isinstance(data, dict):
+                speaker_types = data.get("speaker_types", {})
+                for code, info in speaker_types.items():
+                    if not isinstance(info, dict):
+                        continue
+                    patterns = info.get("patterns", [])
+                    for phrase in patterns:
+                        if isinstance(phrase, str) and phrase.strip():
+                            norm = self.normalize_phrase(phrase)
+                            if norm:
+                                self.ontology[norm] = code
+                                self.part_dictionary[norm] = code
+        except Exception:
+            pass
+
+    def _load_phrase_normalization(self) -> None:
+        """Load phrase normalization map and expand ontology/spelling_corrections."""
+        try:
+            data = json.loads(PHRASE_NORMALIZATION_FILE.read_text(encoding="utf-8"))
+            if isinstance(data, dict):
+                normalizations = data.get("normalizations", {})
+                for src, dst in normalizations.items():
+                    src_norm = self.normalize_phrase(src)
+                    dst_norm = self.normalize_phrase(dst)
+                    if src_norm and dst_norm and src_norm != dst_norm:
+                        # Add as spelling correction so messy titles get normalized
+                        self.spelling_corrections[src_norm] = dst_norm
+        except Exception:
+            pass
+
+    def _load_backdoor_patterns(self) -> None:
+        """Load back door detection patterns and camera lens suffix rules."""
+        try:
+            data = json.loads(BACKDOOR_PATTERNS_FILE.read_text(encoding="utf-8"))
+            if isinstance(data, dict):
+                for phrase in data.get("detection_patterns", []):
+                    norm = self.normalize_phrase(phrase)
+                    if norm:
+                        self.ontology[norm] = "BDR"
+                        self.part_dictionary[norm] = "BDR"
+                # Back door + camera lens combos
+                for phrase in data.get("with_camera_lens_patterns", []):
+                    # These are modifiers; the base detection + BCL suffix logic
+                    # is handled in _build_sku_with_backdoor_attrs
+                    pass
+        except Exception:
+            pass
+
+    def _load_brand_dataset(self) -> None:
+        """Merge brand aliases into BRAND_FAMILY_MAP."""
+        try:
+            data = json.loads(BRAND_DATASET_FILE.read_text(encoding="utf-8"))
+            if isinstance(data, dict):
+                alias_map = data.get("brand_alias_map", {})
+                brands = data.get("brands", {})
+                for alias, canonical in alias_map.items():
+                    alias_norm = self.normalize_phrase(alias)
+                    canonical_info = brands.get(canonical, {})
+                    sku_prefix = canonical_info.get("sku_prefix", canonical.upper())
+                    if alias_norm and sku_prefix:
+                        BRAND_FAMILY_MAP[alias_norm] = sku_prefix
+                for brand_key, brand_info in brands.items():
+                    if not isinstance(brand_info, dict):
+                        continue
+                    canonical = self.normalize_phrase(brand_key)
+                    sku_prefix = brand_info.get("sku_prefix", brand_key.upper())
+                    for alias in brand_info.get("aliases", []):
+                        alias_norm = self.normalize_phrase(alias)
+                        if alias_norm and sku_prefix:
+                            BRAND_FAMILY_MAP[alias_norm] = sku_prefix
+        except Exception:
+            pass
+
+    def _sku_brand_from_dataset_brand(self, brand_value: str) -> str:
+        brand_norm = self.normalize_phrase(brand_value)
+        if not brand_norm:
+            return ""
+        sku_brand = BRAND_FAMILY_MAP.get(brand_norm, "")
+        if sku_brand:
+            return self.normalize_code(sku_brand)
+        compact = brand_norm.replace(" ", "")
+        sku_brand = BRAND_FAMILY_MAP.get(compact, "")
+        if sku_brand:
+            return self.normalize_code(sku_brand)
+        return self.normalize_code(brand_value)
+
+    def _normalize_model_for_sku(
+        self,
+        sku_brand: str,
+        dataset_brand: str,
+        raw_model: str,
+    ) -> str:
+        model = self.normalize_code(raw_model)
+        if not model:
+            return ""
+        dataset_brand_code = self.normalize_code(dataset_brand)
+        for prefix in (dataset_brand_code, sku_brand):
+            if prefix and model.startswith(prefix + " "):
+                model = model[len(prefix) + 1 :].strip()
+        if not model:
+            model = self.normalize_code(raw_model)
+        return model
+
+    def _load_device_model_database(self) -> None:
+        """Load global smartphone models and build longest-match lookup indexes."""
+        self._device_model_exact = {}
+        self._device_model_alias_index = {}
+        self._device_model_max_tokens = 0
+
+        try:
+            data = json.loads(DEVICE_MODEL_DATABASE_FILE.read_text(encoding="utf-8"))
+        except Exception:
+            return
+        if not isinstance(data, dict):
+            return
+        models = data.get("models", [])
+        if not isinstance(models, list):
+            return
+
+        exact: dict[str, list[tuple[str, str, tuple[str, ...], int, int]]] = {}
+        alias_index: dict[str, set[str]] = {}
+        seen_keys: set[tuple[str, str, str]] = set()
+
+        for row in models:
+            if not isinstance(row, dict):
+                continue
+            dataset_brand = str(row.get("brand", "")).strip()
+            model_raw = str(row.get("model", "")).strip()
+            if not dataset_brand or not model_raw:
+                continue
+
+            sku_brand = self._sku_brand_from_dataset_brand(dataset_brand)
+            model_for_sku = self._normalize_model_for_sku(sku_brand, dataset_brand, model_raw)
+            if not sku_brand or not model_for_sku:
+                continue
+
+            model_codes = tuple(
+                self.normalize_code(code)
+                for code in row.get("model_codes", [])
+                if self.normalize_code(code)
+            )
+
+            aliases: set[str] = {str(model_raw)}
+            aliases.update(str(alias) for alias in row.get("aliases", []) if str(alias).strip())
+            aliases.add(f"{sku_brand} {model_for_sku}".strip())
+            aliases.add(model_for_sku)
+
+            for alias in aliases:
+                alias_norm = self.normalize_phrase(alias)
+                if not alias_norm or len(alias_norm) < 3:
+                    continue
+                token_len = len(alias_norm.split())
+                if token_len == 0:
+                    continue
+
+                dedupe_key = (alias_norm, sku_brand, model_for_sku)
+                if dedupe_key in seen_keys:
+                    continue
+                seen_keys.add(dedupe_key)
+
+                payload = (
+                    sku_brand,
+                    model_for_sku,
+                    model_codes,
+                    token_len,
+                    len(model_for_sku),
+                )
+                exact.setdefault(alias_norm, []).append(payload)
+                first_token = alias_norm.split()[0]
+                alias_index.setdefault(first_token, set()).add(alias_norm)
+                self._device_model_max_tokens = max(self._device_model_max_tokens, token_len)
+
+        for alias, entries in exact.items():
+            entries.sort(
+                key=lambda item: (
+                    -int(item[3]),  # matched alias token length
+                    -int(item[4]),  # canonical model length
+                    -len(item[1]),  # canonical model char length
+                )
+            )
+            exact[alias] = entries
+
+        self._device_model_exact = exact
+        self._device_model_alias_index = {
+            token: tuple(sorted(values, key=len, reverse=True))
+            for token, values in alias_index.items()
+        }
+
+    def _detect_brand_model_from_dataset(self, normalized_title: str) -> tuple[str, str, str]:
+        if not normalized_title or not self._device_model_exact:
+            return "", "", ""
+
+        tokens = self.tokenize(normalized_title)
+        if not tokens:
+            return "", "", ""
+
+        title_brand_hint = ""
+        for token in tokens:
+            mapped_brand = BRAND_FAMILY_MAP.get(token, "")
+            if mapped_brand:
+                title_brand_hint = self.normalize_code(mapped_brand)
+                break
+
+        max_tokens = min(self._device_model_max_tokens, len(tokens))
+        for ngram_size in range(max_tokens, 0, -1):
+            for idx in range(0, len(tokens) - ngram_size + 1):
+                phrase = " ".join(tokens[idx : idx + ngram_size])
+                entries = self._device_model_exact.get(phrase, ())
+                if not entries:
+                    continue
+                if title_brand_hint:
+                    entries = tuple(item for item in entries if item[0] == title_brand_hint)
+                    if not entries:
+                        continue
+                elif ngram_size == 1:
+                    # Single-token model aliases are highly ambiguous without brand context.
+                    continue
+                best_brand, best_model, best_codes, _matched_tokens, _model_size = entries[0]
+                best_code = best_codes[0] if best_codes else ""
+                return best_brand, best_model, best_code
+
+        if RAPIDFUZZ_AVAILABLE and self._device_model_alias_index:
+            candidate_aliases: set[str] = set()
+            for token in set(tokens):
+                candidate_aliases.update(self._device_model_alias_index.get(token, ()))
+            if candidate_aliases:
+                fuzzy_matches = rf_process.extract(
+                    normalized_title,
+                    tuple(candidate_aliases),
+                    scorer=fuzz.partial_ratio,
+                    score_cutoff=86,
+                    limit=25,
+                )
+                best_payload: tuple[str, str, str] | None = None
+                best_weighted = -1.0
+                for alias, score, _idx in fuzzy_matches:
+                    entries = self._device_model_exact.get(str(alias), ())
+                    if not entries:
+                        continue
+                    if title_brand_hint:
+                        entries = tuple(item for item in entries if item[0] == title_brand_hint)
+                        if not entries:
+                            continue
+                    elif len(str(alias).split()) < 2:
+                        continue
+                    for brand, model, model_codes, _matched_tokens, _model_size in entries:
+                        weighted = float(score) + (len(model) * 0.03)
+                        if weighted > best_weighted:
+                            best_weighted = weighted
+                            best_payload = (
+                                brand,
+                                model,
+                                model_codes[0] if model_codes else "",
+                            )
+                if best_payload is not None:
+                    return best_payload
+
+        return "", "", ""
+
+    def _compress_color_token(self, color_value: str, *, compress: bool = True) -> str:
+        normalized_color = self.normalize_code(color_value)
+        if not normalized_color:
+            return ""
+        if not compress or not self._compress_color_codes:
+            return normalized_color
+        if self.sku_color_codes:
+            mapped = self.sku_color_codes.get(normalized_color, "")
+            if mapped:
+                return self.normalize_code(mapped)
+        mapped = DEFAULT_COLOR_CODE_MAP.get(normalized_color, "")
+        if mapped:
+            return self.normalize_code(mapped)
+        return normalized_color
+
+    def _detect_color(self, normalized_title: str, *, compress: bool = True) -> str:
+        """Detect color using longest-match from multi-word synonyms first, then single tokens."""
+        title_lower = normalized_title
+        if hasattr(self, "_color_synonym_items"):
+            for phrase, color_val in self._color_synonym_items:
+                if (
+                    f" {phrase} " in f" {title_lower} "
+                    or title_lower.endswith(f" {phrase}")
+                    or title_lower.startswith(f"{phrase} ")
+                    or title_lower == phrase
+                ):
+                    return self._compress_color_token(color_val, compress=compress)
         tokens = self.tokenize(normalized_title)
         found = [COLOR_CODES[token] for token in tokens if token in COLOR_CODES]
         if not found:
             return ""
-        return found[-1]
+        return self._compress_color_token(found[-1], compress=compress)
 
     def _layer1_rule_engine(self, normalized_title: str) -> tuple[str, str, float]:
         padded = f" {normalized_title} "
@@ -1315,7 +2548,10 @@ class SKUIntelligenceEngine:
         normalized = self._canonicalize_part_code(code)
         if not normalized:
             return
-        parts = [self._canonicalize_part_code(token) for token in normalized.split()]
+        if normalized == "BAT FPC":
+            parts = ["BAT", "FPC"]
+        else:
+            parts = [self._canonicalize_part_code(token) for token in normalized.split()]
         parts = [token for token in parts if token]
         if not parts:
             return
@@ -1365,11 +2601,44 @@ class SKUIntelligenceEngine:
             for removable in ("ES", "PS"):
                 detected.pop(removable, None)
 
-        if {"wireless", "nfc", "charging", "flex"} <= tokens:
+        if (
+            ({"wireless", "nfc", "charging"} <= tokens)
+            or ({"wireless", "charging"} <= tokens)
+            or ({"nfc", "charging"} <= tokens)
+        ) and ({"flex"} <= tokens or {"port"} <= tokens):
             pos = corrected_title.find("wireless")
-            self._add_detected_code(detected, "NFC", "combo_rule", pos)
-            self._add_detected_code(detected, "CF", "combo_rule", pos)
-            detected.pop("CP", None)
+            if pos < 0:
+                pos = corrected_title.find("nfc")
+            nfc_combo_code = self._lookup_ontology_code(
+                (
+                    "wireless nfc charging flex",
+                    "wireless charging flex",
+                    "nfc charging flex",
+                    "wireless nfc flex",
+                ),
+                fallback="NFC-CF",
+            )
+            self._add_detected_code(detected, nfc_combo_code, "combo_rule", pos)
+            for removable in ("NFC", "CF", "CP", "WLC"):
+                detected.pop(removable, None)
+
+        if (
+            (" battery fpc connector " in padded)
+            or (" battery flex connector " in padded)
+            or (" battery connector " in padded)
+        ):
+            pos = corrected_title.find("battery")
+            battery_connector_code = self._lookup_ontology_code(
+                (
+                    "battery fpc connector",
+                    "battery flex connector",
+                    "battery connector",
+                ),
+                fallback="BAT FPC",
+            )
+            self._add_detected_code(detected, battery_connector_code, "combo_rule", pos)
+            for removable in ("BATT", "CP", "CF"):
+                detected.pop(removable, None)
 
         if {"charging", "port", "flex"} <= tokens:
             pos = corrected_title.find("charging")
@@ -1406,6 +2675,42 @@ class SKUIntelligenceEngine:
         if {"ear", "receiver"} <= tokens:
             pos = corrected_title.find("ear")
             self._add_detected_code(detected, "ES", "combo_rule", pos)
+
+        if (
+            (" vibrator and earpiece " in padded)
+            or (" vibrator earpiece " in padded)
+            or (" vibrator and ear speaker " in padded)
+            or (" vibrator ear speaker " in padded)
+        ):
+            pos = corrected_title.find("vibrator")
+            combo_code = self._lookup_ontology_code(
+                (
+                    "vibrator and earpiece",
+                    "vibrator & earpiece",
+                    "vibration and ear speaker",
+                    "vibration ear speaker",
+                ),
+                fallback="V/ES",
+            )
+            self._add_detected_code(detected, combo_code, "combo_rule", pos)
+            for removable in ("VIB", "ES", "LS"):
+                detected.pop(removable, None)
+
+        if (
+            (" lift motor " in padded)
+            or (" pop up camera motor " in padded)
+            or (" popup camera motor " in padded)
+            or (" pop-up camera motor " in padded)
+        ):
+            pos = corrected_title.find("lift")
+            if pos < 0:
+                pos = corrected_title.find("camera motor")
+            lift_code = self._lookup_ontology_code(
+                ("lift motor", "pop-up camera motor", "popup camera motor", "pop up camera motor"),
+                fallback="LIFT-MOT",
+            )
+            self._add_detected_code(detected, lift_code, "combo_rule", pos)
+            detected.pop("VIB", None)
 
         if {"vibrator", "motor"} <= tokens:
             pos = corrected_title.find("vibrator")
@@ -1530,11 +2835,33 @@ class SKUIntelligenceEngine:
         main_code = ordered_codes[0]
         secondary_codes = [code for code in ordered_codes[1:] if code != main_code]
 
-        if "NFC" in ordered_codes and "CF" in ordered_codes and {"wireless", "nfc", "charging", "flex"} <= set(self.tokenize(corrected_title)):
-            main_code = "NFC"
-            secondary_codes = [code for code in secondary_codes if code != "NFC"]
-            if "CF" in ordered_codes and "CF" not in secondary_codes:
-                secondary_codes.insert(0, "CF")
+        if "NFC-CF" in ordered_codes:
+            main_code = "NFC-CF"
+            secondary_codes = [code for code in secondary_codes if code != "NFC-CF"]
+        elif "NFC" in ordered_codes and "CF" in ordered_codes and (
+            {"wireless", "nfc", "charging", "flex"} <= set(self.tokenize(corrected_title))
+            or {"wireless", "charging", "flex"} <= set(self.tokenize(corrected_title))
+            or {"nfc", "charging", "flex"} <= set(self.tokenize(corrected_title))
+        ):
+            nfc_combo = self._lookup_ontology_code(
+                (
+                    "wireless nfc charging flex",
+                    "wireless charging flex",
+                    "nfc charging flex",
+                    "wireless nfc flex",
+                ),
+                fallback="NFC-CF",
+            )
+            main_code = nfc_combo or "NFC-CF"
+            secondary_codes = [code for code in secondary_codes if code not in {"NFC", "CF", main_code}]
+
+        # Back door SKUs are canonicalized as BDR BCL (not BCL BDR) to avoid
+        # cross-catalog duplication for rear housing/lens variants.
+        if "BDR" in ordered_codes and "BCL" in ordered_codes:
+            main_code = "BDR"
+            secondary_codes = [code for code in ordered_codes if code != "BDR"]
+            if "BCL" in secondary_codes:
+                secondary_codes = ["BCL"] + [code for code in secondary_codes if code != "BCL"]
 
         combined = " ".join([main_code, *secondary_codes]).strip()
 
@@ -1693,6 +3020,126 @@ class SKUIntelligenceEngine:
             return " ".join(kept)
         return sku[: self.config.max_sku_length].rstrip()
 
+    def _part_needs_color_suffix(self, part_code: str) -> bool:
+        """Return True if this part type must include color to prevent duplicate SKUs."""
+        code_upper = part_code.strip().upper()
+        # Check if any token in the part code is a color-bearing type
+        for bearing in COLOR_BEARING_PARTS:
+            if bearing in code_upper:
+                return True
+        return False
+
+    def _detect_backdoor_camera_lens(self, normalized_title: str) -> bool:
+        """Return True if the title mentions a camera lens as part of a back door."""
+        lens_indicators = [
+            "with camera lens", "with cam lens", "with lens", "camera lens included",
+            "incl camera lens", "+ camera lens", "+ lens", "with camera glass",
+            "and camera lens", "& camera lens", "camera lens", "lens cover",
+            "camera lens cover", "lens glass", "camera lens glass", "camera glass",
+        ]
+        for indicator in lens_indicators:
+            if indicator in normalized_title:
+                return True
+        return False
+
+    def _is_fpc_connector_context(self, normalized_title: str) -> bool:
+        padded = f" {normalized_title} "
+        if (
+            " battery fpc connector " in padded
+            or " battery flex connector " in padded
+            or " battery connector " in padded
+        ):
+            return False
+        return (
+            " lcd fpc connector " in padded
+            or " display connector flex " in padded
+            or " screen connector flex " in padded
+            or " touch connector flex " in padded
+            or " screen fpc connector " in padded
+            or " fpc connector " in padded
+        )
+
+    def _contains_backdoor_phrase(self, normalized_title: str) -> bool:
+        phrases = (
+            "back door",
+            "back cover",
+            "back glass",
+            "rear cover",
+            "rear door",
+            "battery cover",
+            "battery door",
+            "back housing",
+            "rear housing",
+            "back panel",
+            "rear panel",
+        )
+        return any(self._contains_phrase(normalized_title, phrase) for phrase in phrases)
+
+    def _apply_backdoor_attributes(self, part_code: str, normalized_title: str) -> str:
+        normalized_part = self.normalize_code(part_code)
+        if normalized_part == "BAT FPC":
+            tokens = ["BAT", "FPC"]
+        else:
+            tokens = [self._canonicalize_part_code(token) for token in normalized_part.split()]
+        tokens = [token for token in tokens if token]
+        if not tokens:
+            return part_code
+
+        has_backdoor_context = self._contains_backdoor_phrase(normalized_title)
+        if has_backdoor_context and "BDR" not in tokens:
+            tokens.insert(0, "BDR")
+
+        without_lens = (
+            self._contains_phrase(normalized_title, "without camera lens")
+            or self._contains_phrase(normalized_title, "without lens")
+        )
+        if "BDR" in tokens and not without_lens and "BCL" not in tokens:
+            # Most back doors are sold with lens glass; keep BCL as default to
+            # avoid collapsing distinct back-door SKUs.
+            bdr_idx = tokens.index("BDR")
+            tokens.insert(bdr_idx + 1, "BCL")
+
+        if "BDR" in tokens:
+            # Keep BDR canonicalized as the primary part with optional BCL immediately after it.
+            remainder = [token for token in tokens if token not in {"BDR", "BCL"}]
+            out_tokens: list[str] = ["BDR"]
+            if "BCL" in tokens:
+                out_tokens.append("BCL")
+            out_tokens.extend(remainder)
+            tokens = out_tokens
+
+        return " ".join(tokens)
+
+    def _apply_sim_tray_mode(self, part_code: str, normalized_title: str) -> str:
+        code = self._canonicalize_part_code(part_code)
+        if not code:
+            return code
+        if code not in {"ST", "STD"}:
+            return code
+        padded = f" {normalized_title} "
+        if " dual sim tray " in padded or " dual sim " in padded:
+            return "STD"
+        if " single sim tray " in padded or " single sim " in padded:
+            return "ST"
+        return code
+
+    def _apply_pixel_part_overrides(self, part_code: str, brand: str, normalized_title: str) -> str:
+        """Pixel-specific formatting while keeping existing ontology codes for other brands."""
+        code = self._canonicalize_part_code(part_code)
+        if self.normalize_code(brand) != "PIXEL":
+            return code
+        if not code:
+            return code
+
+        tokens = [token for token in self.normalize_code(code).split() if token]
+        if not tokens:
+            return code
+
+        if "BDR" in tokens or self._contains_backdoor_phrase(normalized_title):
+            # Pixel backdoor convention keeps literal BACKDOOR and does not append BCL.
+            return "BACKDOOR"
+        return code
+
     def _build_sku(
         self,
         brand: str,
@@ -1716,8 +3163,121 @@ class SKUIntelligenceEngine:
         if part_code:
             tokens.extend(self.normalize_code(part_code).split())
 
+        if variant:
+            variant_tokens = [
+                token
+                for token in self.normalize_code(variant).split()
+                if token in SKU_VARIANT_TOKENS
+            ]
+            tokens.extend(variant_tokens)
+
+        # Append color suffix for parts that vary by color (prevents duplicate SKUs)
+        if color and self._part_needs_color_suffix(part_code):
+            tokens.append(color)
+
         raw_sku = self.normalize_code(" ".join(tokens))
+        if "/" in self.normalize_code(model):
+            # Preserve multi-model compatibility groups for shared Pixel parts.
+            return raw_sku
+        if color and self._part_needs_color_suffix(part_code) and len(raw_sku) > self.config.max_sku_length:
+            # Preserve distinguishing color for duplicate-prone parts instead of
+            # truncating it away.
+            return raw_sku
         return self._trim_sku(raw_sku)
+
+    def _enrich_parse_result_with_attributes(
+        self,
+        parsed: ParseResult,
+        product_name: str,
+        product_description: str = "",
+    ) -> ParseResult:
+        if not parsed.suggested_sku or parsed.suggested_sku == NOT_UNDERSTANDABLE:
+            return parsed
+
+        normalized_title = self.normalize_text(f"{product_name} {product_description}".strip())
+        if not normalized_title:
+            return parsed
+
+        part_code = self._canonicalize_part_code(parsed.part_code)
+        part_code = self._apply_backdoor_attributes(part_code, normalized_title)
+        part_code = self._apply_sim_tray_mode(part_code, normalized_title)
+        part_code = self._apply_pixel_part_overrides(part_code, parsed.brand, normalized_title)
+
+        variant_tokens: list[str] = []
+        for token in self.normalize_code(parsed.variant).split():
+            if token and token not in variant_tokens:
+                variant_tokens.append(token)
+        for token in self.normalize_code(self._detect_variant(normalized_title)).split():
+            if token and token not in variant_tokens:
+                variant_tokens.append(token)
+        variant = " ".join(variant_tokens)
+
+        pixel_brand = self.normalize_code(parsed.brand) == "PIXEL"
+        color = self._compress_color_token(parsed.color, compress=not pixel_brand)
+        if not color and self._part_needs_color_suffix(part_code):
+            color = self._detect_color(normalized_title, compress=not pixel_brand)
+
+        sku = self._build_sku(
+            brand=parsed.brand,
+            model=parsed.model,
+            model_code=parsed.model_code,
+            part_code=part_code,
+            variant=variant,
+            color=color,
+        )
+
+        if not sku:
+            sku = NOT_UNDERSTANDABLE
+
+        return ParseResult(
+            product_name=parsed.product_name,
+            suggested_sku=sku,
+            confidence_score=parsed.confidence_score,
+            parser_reason=parsed.parser_reason,
+            decision=self._decide(parsed.confidence_score),
+            brand=parsed.brand,
+            model=parsed.model,
+            model_code=parsed.model_code,
+            part_code=self.normalize_code(part_code),
+            variant=self.normalize_code(variant),
+            color=self.normalize_code(color),
+        )
+
+    def _resolve_duplicate_sku_rows(
+        self,
+        parsed_rows: list[ParseResult | None],
+        row_keys: list[tuple[str, str, str]],
+    ) -> list[ParseResult | None]:
+        resolved_rows = list(parsed_rows)
+        for _pass_idx in range(2):
+            sku_to_indexes: dict[str, list[int]] = {}
+            for idx, row in enumerate(resolved_rows):
+                if row is None:
+                    continue
+                sku = self.normalize_code(row.suggested_sku)
+                if not sku or sku == NOT_UNDERSTANDABLE:
+                    continue
+                sku_to_indexes.setdefault(sku, []).append(idx)
+
+            duplicate_groups = [indexes for indexes in sku_to_indexes.values() if len(indexes) > 1]
+            if not duplicate_groups:
+                break
+
+            changed = False
+            for indexes in duplicate_groups:
+                for idx in indexes:
+                    row = resolved_rows[idx]
+                    if row is None:
+                        continue
+                    name, _product_sku, _web_sku = row_keys[idx]
+                    enriched = self._enrich_parse_result_with_attributes(row, name)
+                    if enriched.suggested_sku != row.suggested_sku or enriched.part_code != row.part_code:
+                        resolved_rows[idx] = enriched
+                        changed = True
+            if not changed:
+                break
+
+        return resolved_rows
 
     @lru_cache(maxsize=MAX_PARSE_CACHE_SIZE)
     def _parse_cached(
@@ -1734,6 +3294,7 @@ class SKUIntelligenceEngine:
             normalized_title,
             learn=False,
         )
+        parsing_title = self._normalize_pixel_title(corrected_title)
 
         if self._should_filter_display_assembly(normalized_title):
             return (
@@ -1748,24 +3309,42 @@ class SKUIntelligenceEngine:
                 "",
             )
 
-        brand, model = self._detect_brand_model(corrected_title)
+        brand, model, detected_model_code = self._detect_brand_model(parsing_title)
+        if self.normalize_code(brand) == "PIXEL":
+            compatibility_group = self._detect_pixel_compatibility_group(title_source)
+            if compatibility_group:
+                model = compatibility_group
+                detected_model_code = ""
         model_code = self._extract_model_code(title_source, model=f"{brand} {model}".strip())
+        if not model_code and detected_model_code:
+            detected_compact = re.sub(r"[^A-Z0-9]", "", self.normalize_code(detected_model_code))
+            title_compact = re.sub(r"[^A-Z0-9]", "", self.normalize_code(title_source))
+            if detected_compact and detected_compact in title_compact:
+                model_code = self.normalize_code(detected_model_code)
         if not model_code and normalized_hint:
             model_code = self._extract_model_code(normalized_hint, model=f"{brand} {model}".strip())
 
         part_code, reason, base_conf = self._combine_parts_by_priority(
-            corrected_title=corrected_title,
+            corrected_title=parsing_title,
             normalized_hint=normalized_hint,
         )
 
+        if self._is_fpc_connector_context(parsing_title):
+            part_code = "FPC"
+            reason = "fpc_connector_context"
+            base_conf = max(base_conf, 0.96)
+
         if not part_code:
-            code, stage_reason, conf = self._generic_component_fallback(corrected_title)
+            code, stage_reason, conf = self._generic_component_fallback(parsing_title)
             if code:
                 part_code = code
                 reason = stage_reason
                 base_conf = conf
 
         part_code = self._canonicalize_part_code(part_code)
+        part_code = self._apply_backdoor_attributes(part_code, parsing_title)
+        part_code = self._apply_sim_tray_mode(part_code, normalized_title)
+        part_code = self._apply_pixel_part_overrides(part_code, brand, parsing_title)
         if correction_confidence < 0.95:
             if correction_confidence >= 0.90:
                 base_conf = max(0.0, base_conf - 0.03)
@@ -1776,8 +3355,9 @@ class SKUIntelligenceEngine:
         if reason and correction_method != "exact":
             reason = f"{reason}+{correction_method}"
 
-        variant = self._detect_variant(corrected_title)
-        color = self._detect_color(corrected_title)
+        variant = self._detect_variant(parsing_title)
+        pixel_brand = self.normalize_code(brand) == "PIXEL"
+        color = self._detect_color(parsing_title, compress=not pixel_brand)
 
         confidence = self._compute_confidence(
             base=base_conf,
@@ -1839,6 +3419,12 @@ class SKUIntelligenceEngine:
             color,
         ) = self._parse_cached(name_text, sku_hint_text, web_hint_text, description_text)
 
+        corrected_sku, override_applied = self._apply_sku_corrections(sku, combined_title_text)
+        if override_applied:
+            sku = corrected_sku
+            confidence = max(float(confidence), 0.99)
+            reason = f"{reason}+manual_override" if reason else "manual_override"
+
         parsed = ParseResult(
             product_name=name_text,
             suggested_sku=sku,
@@ -1855,6 +3441,21 @@ class SKUIntelligenceEngine:
         if parsed.confidence_score < 0.90 and parsed.part_code:
             self._update_unknown_log(name_text, parsed.part_code)
         return parsed
+
+    def detect_part(
+        self,
+        title: object,
+        product_sku_hint: object = "",
+        product_web_sku_hint: object = "",
+        product_description_hint: object = "",
+    ) -> str:
+        parsed = self.parse_title(
+            title,
+            product_sku_hint,
+            product_web_sku_hint,
+            product_description_hint,
+        )
+        return self.normalize_code(parsed.part_code)
 
     def _detect_manufacturer_label(self, corrected_title: str) -> str:
         for token in self.tokenize(corrected_title):
@@ -1890,6 +3491,7 @@ class SKUIntelligenceEngine:
             normalized,
             learn=False,
         )
+        corrected_title = self._normalize_pixel_title(corrected_title)
 
         primary_part, secondary_part = self._split_primary_secondary_part(parsed.part_code)
         model_component = " ".join(token for token in (parsed.brand, parsed.model) if token).strip()
@@ -2037,6 +3639,7 @@ class SKUIntelligenceEngine:
         phrase_code_votes: dict[str, Counter[str]] = defaultdict(Counter)
         model_pattern_counter: Counter[str] = Counter()
         abbreviations_counter: Counter[str] = Counter()
+        raw_phrase_counter: Counter[str] = Counter()
 
         for row in result_df[
             [
@@ -2052,6 +3655,11 @@ class SKUIntelligenceEngine:
             part_code = self.normalize_code(row[2])
             confidence = float(row[3] or 0.0)
             final_sku = str(row[4])
+            raw_normalized_title = self.normalize_text(title)
+            if self._contains_phrase(raw_normalized_title, "charging socket"):
+                raw_phrase_counter["charging socket"] += 1
+            if self._contains_phrase(raw_normalized_title, "receiver speaker"):
+                raw_phrase_counter["receiver speaker"] += 1
             tokens = self._tokenize_title_for_pattern_learning(title)
             ngrams = self._iter_title_ngrams(tokens)
             if ngrams:
@@ -2093,6 +3701,17 @@ class SKUIntelligenceEngine:
             if existing_code == mapped_code:
                 continue
             learned_updates[phrase] = mapped_code
+
+        # Preserve high-frequency supplier phrasing in learned patterns even when
+        # phrase normalization rewrites them at parse-time.
+        if raw_phrase_counter.get("charging socket", 0) >= min_freq:
+            charging_code = learned_updates.get("charging port") or self.learned_patterns.get("charging port")
+            if charging_code:
+                learned_updates.setdefault("charging socket", self._canonicalize_part_code(charging_code))
+        if raw_phrase_counter.get("receiver speaker", 0) >= min_freq:
+            speaker_code = learned_updates.get("earpiece speaker") or self.learned_patterns.get("earpiece speaker")
+            if speaker_code:
+                learned_updates.setdefault("receiver speaker", self._canonicalize_part_code(speaker_code))
 
         if learned_updates:
             self.learned_patterns.update(learned_updates)
@@ -2223,6 +3842,7 @@ class SKUIntelligenceEngine:
 
         row_keys = list(key_df.itertuples(index=False, name=None))
         parsed_rows = [parsed_map.get(key) for key in row_keys]
+        parsed_rows = self._resolve_duplicate_sku_rows(parsed_rows, row_keys)
 
         output_df = df.copy()
         output_df["Product New SKU"] = [

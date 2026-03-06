@@ -5,9 +5,16 @@ from pathlib import Path
 
 import pandas as pd
 
-import sku_parser
-from sku_intelligence_engine import EngineConfig, SKUIntelligenceEngine
-from sku_parser import (
+from backend import sku_parser
+from backend.sku_intelligence_engine import (
+    EngineConfig,
+    PARTS_DICTIONARY_FILE,
+    PARTS_ONTOLOGY_FILE,
+    PART_CODE_RULES_FILE,
+    SPELLING_CORRECTIONS_FILE,
+    SKUIntelligenceEngine,
+)
+from backend.sku_parser import (
     NOT_UNDERSTANDABLE,
     LEARNED_TITLE_PATTERNS_FILE,
     PART_CODE_RULES_FILE,
@@ -38,22 +45,19 @@ def test_strict_rules_dataset_outputs_standardized_codes() -> None:
     assert generate_sku("Galaxy A52 A525 Power Volume Flex") == "GALAXY A52 A525 PV-F"
     assert generate_sku("Galaxy A52 A525 Power Button Flex") == "GALAXY A52 A525 PB-F"
     assert generate_sku("Galaxy A52 A525 Volume Button Flex") == "GALAXY A52 A525 VOL-F"
-    assert generate_sku("Galaxy A52 A525 Power Flex") == "GALAXY A52 A525 P-F"
+    assert generate_sku("Galaxy A52 A525 Power Flex") == "GALAXY A52 A525 PB-F"
     assert generate_sku("Galaxy A52 A525 Vibrator Flex") == "GALAXY A52 A525 VB-F"
-    assert generate_sku("Galaxy A52 A525 Loudspeaker Flex") == "GALAXY A52 A525 L-FLEX"
+    assert generate_sku("Galaxy A52 A525 Loudspeaker Flex") == "GALAXY A52 A525 LCD-F"
     assert generate_sku("Galaxy A52 A525 Camera Flex") == "GALAXY A52 A525 CAM-F"
     assert generate_sku("Galaxy A52 A525 Microphone Flex") == "GALAXY A52 A525 MIC-FC"
     assert generate_sku("Galaxy A52 A525 WiFi Antenna") == "GALAXY A52 A525 WIF-ANNT"
     assert generate_sku("Galaxy A52 A525 Antenna Connector") == "GALAXY A52 A525 ANNT-CONN"
-    assert generate_sku("Galaxy A52 A525 SIM Reader") == "GALAXY A52 A525 SC-R"
+    assert generate_sku("Galaxy A52 A525 SIM Reader") == "GALAXY A52 A525 SR"
     assert generate_sku("Galaxy A52 A525 Mainboard Flex Cable") in {
         "GALAXY A52 A525 MFC",
         "GALAXY A52 A525 MB-FC",
     }
-    assert generate_sku("Galaxy A52 A525 NFC Flex") in {
-        "GALAXY A52 A525 NFC",
-        "GALAXY A52 A525 NFC-F",
-    }
+    assert generate_sku("Galaxy A52 A525 NFC Flex") == "GALAXY A52 A525 NFC"
     assert generate_sku("Galaxy A52 A525 Ear Speaker Proximity Sensor") == "GALAXY A52 A525 ES-PS"
     assert generate_sku("Galaxy A52 A525 Vibration Ear Speaker") == "GALAXY A52 A525 V/ES"
     assert generate_sku("Galaxy A52 A525 Lift Motor") == "GALAXY A52 A525 LIFT-MOT"
@@ -90,6 +94,14 @@ def test_model_prefix_rule_and_length_limit() -> None:
     sku = generate_sku("Samsung Galaxy A52 A525 Power Button Flex Black")
     assert sku.startswith("GALAXY A52 A525")
     assert len(sku) <= 31
+
+
+def test_model_detection_prefers_longest_specific_match() -> None:
+    assert analyze_title("pixel 8 pro ear speaker")["model"] == "PIXEL 8 PRO"
+    assert analyze_title("pixel 8 charging port")["model"] == "PIXEL 8"
+    assert analyze_title("galaxy s23 ultra charging port")["model"] == "GALAXY S23 ULTRA"
+    assert analyze_title("iphone 13 pro max battery")["model"] == "IPHONE 13 PRO MAX"
+    assert analyze_title("redmi note 12 pro display")["model"] == "REDMI NOTE 12 PRO"
 
 
 def test_display_assembly_filtering_kept() -> None:
@@ -145,8 +157,161 @@ def test_combination_rules_map_to_special_codes() -> None:
     assert generate_sku("Galaxy A71 A716 Ear Speaker Proximity Sensor") == "GALAXY A71 A716 ES-PS"
     assert (
         generate_sku("Galaxy A71 A716 Wireless NFC Charging Flex")
-        == "GALAXY A71 A716 NFC CF"
+        == "GALAXY A71 A716 NFC-CF"
     )
+
+
+def test_backdoor_attributes_include_bcl_and_color_when_detected() -> None:
+    assert (
+        generate_sku("Galaxy A80 A805 Back Door with Camera Lens White")
+        == "GALAXY A80 A805 BDR BCL WHT"
+    )
+    assert (
+        generate_sku("Galaxy A80 A805 Back Door lens cover Gold")
+        == "GALAXY A80 A805 BDR BCL GLD"
+    )
+
+
+def test_nfc_flex_bracket_variant_suffix() -> None:
+    assert (
+        generate_sku("Galaxy A71 5G A716 Wireless NFC Charging Flex")
+        == "GALAXY A71 5G A716 NFC-CF"
+    )
+    assert (
+        generate_sku("Galaxy A71 5G A716 Wireless NFC Charging Flex with Bracket")
+        == "GALAXY A71 5G A716 NFC-CF BRKT"
+    )
+    assert (
+        generate_sku("Galaxy A71 5G A716 Wireless NFC Charging Flex holder")
+        == "GALAXY A71 5G A716 NFC-CF BRKT"
+    )
+
+
+def test_sim_tray_color_suffix_is_preserved() -> None:
+    assert (
+        generate_sku("Galaxy A71 5G A716 Single SIM Tray Prism Cube Black")
+        == "GALAXY A71 5G A716 ST BLK"
+    )
+    assert (
+        generate_sku("Galaxy A71 5G A716 Single SIM Tray Prism Cube Silver")
+        == "GALAXY A71 5G A716 ST SLV"
+    )
+    assert (
+        generate_sku("Galaxy A71 5G A716 Single SIM Tray Prism Cube Blue")
+        == "GALAXY A71 5G A716 ST BLU"
+    )
+
+
+def test_backdoor_rule_includes_bcl_and_color() -> None:
+    assert (
+        generate_sku("Galaxy A35 5G A356 Back Door White")
+        == "GALAXY A35 5G A356 BDR BCL WHT"
+    )
+    assert (
+        generate_sku("Galaxy A35 5G A356 Back Door Black")
+        == "GALAXY A35 5G A356 BDR BCL BLK"
+    )
+    assert (
+        generate_sku("Galaxy A36 5G A366 Back Door with steel plate and camera lens Black")
+        == "GALAXY A36 5G A366 BDR BCL BLK"
+    )
+
+
+def test_fingerprint_sensor_color_suffix() -> None:
+    assert (
+        generate_sku("Fingerprint Sensor for Galaxy A05S A057 Blue")
+        == "GALAXY A05S A057 FS BLU"
+    )
+
+
+def test_dual_single_sim_tray_color_mapping() -> None:
+    assert (
+        generate_sku("Dual Sim Tray Galaxy A06 A065 Gold")
+        == "GALAXY A06 A065 STD GLD"
+    )
+    assert (
+        generate_sku("Single SIM Tray Galaxy A06 A065 BLK")
+        == "GALAXY A06 A065 ST BLK"
+    )
+
+
+def test_wireless_nfc_flex_and_bracket_rule() -> None:
+    assert (
+        generate_sku("Wireless NFC Charging Flex")
+        == "NFC-CF"
+    )
+    assert (
+        generate_sku("Wireless NFC Charging Flex with Bracket")
+        == "NFC-CF BRKT"
+    )
+    assert (
+        generate_sku("Wireless Charging Flex mount")
+        == "NFC-CF BRKT"
+    )
+
+
+def test_inventory_correction_rules_for_new_part_codes() -> None:
+    assert (
+        generate_sku("Galaxy A90 5G A908 Battery FPC Connector (8 Pin)")
+        == "GALAXY A90 5G A908 BAT FPC"
+    )
+    assert (
+        generate_sku("Galaxy A90 5G A908 Battery Connector")
+        == "GALAXY A90 5G A908 BAT FPC"
+    )
+    assert (
+        generate_sku("Galaxy A90 5G A908 Antenna Connecting Cable")
+        == "GALAXY A90 5G A908 ANNT-CONN"
+    )
+    assert (
+        generate_sku("Galaxy A90 5G A908 Antenna Flex")
+        == "GALAXY A90 5G A908 ANNT-CONN"
+    )
+    assert (
+        generate_sku("Galaxy A90 5G A908 Sim Card Reader")
+        == "GALAXY A90 5G A908 SR"
+    )
+    assert (
+        generate_sku("Galaxy A80 A805 Vibrator & Earpiece Speaker")
+        == "GALAXY A80 A805 V/ES"
+    )
+    assert (
+        generate_sku("Galaxy A80 A805 Pop-Up Camera Motor")
+        == "GALAXY A80 A805 LIFT-MOT"
+    )
+    assert (
+        generate_sku("Galaxy A90 5G A908 Motherboard Flex")
+        == "GALAXY A90 5G A908 MB-FC"
+    )
+    assert (
+        generate_sku("Galaxy A90 5G A908 Camera Flex Cable")
+        == "GALAXY A90 5G A908 CAM-F"
+    )
+    assert (
+        generate_sku("Galaxy A90 5G A908 Mic Flex")
+        == "GALAXY A90 5G A908 MIC-FC"
+    )
+    assert (
+        generate_sku("Galaxy A90 5G A908 LCD Flex")
+        == "GALAXY A90 5G A908 LCD-F"
+    )
+
+
+def test_international_version_variant_suffix() -> None:
+    assert (
+        generate_sku("Charging Port Board Galaxy A16 5G A166 (International Version)")
+        == "GALAXY A16 5G A166 CP INT"
+    )
+    assert (
+        generate_sku("Charging Port Board Galaxy A16 5G A166 (INTL Version)")
+        == "GALAXY A16 5G A166 CP INT"
+    )
+
+
+def test_earpiece_synonyms_map_to_es() -> None:
+    assert generate_sku("Galaxy A52 A525 Earpiece") == "GALAXY A52 A525 ES"
+    assert generate_sku("Galaxy A52 A525 Ear Speaker") == "GALAXY A52 A525 ES"
+    assert generate_sku("Galaxy A52 A525 Receiver Speaker") == "GALAXY A52 A525 ES"
 
 
 def test_unknown_log_written_for_generic_fallback(tmp_path: Path) -> None:
@@ -206,6 +371,32 @@ def test_process_inventory_duplicate_smoke(tmp_path: Path) -> None:
     assert result.loc[1, "SKU Duplicate"] == "DUPLICATED"
 
 
+def test_process_inventory_duplicate_resolution_uses_attributes(tmp_path: Path) -> None:
+    input_path = tmp_path / "input.xlsx"
+    output_path = tmp_path / "output.xlsx"
+
+    df = pd.DataFrame(
+        {
+            "Product Name": [
+                "Galaxy A35 5G A356 Back Door White",
+                "Galaxy A35 5G A356 Back Door Black",
+                "Galaxy A16 5G A166 Charging Port Board",
+                "Galaxy A16 5G A166 Charging Port Board International Version",
+            ],
+            "Product SKU": ["", "", "", ""],
+            "Product Web SKU": ["", "", "", ""],
+        }
+    )
+    df.to_excel(input_path, index=False)
+
+    result = process_inventory(input_path, output_path)
+    assert result.loc[0, "Product New SKU"] == "GALAXY A35 5G A356 BDR BCL WHT"
+    assert result.loc[1, "Product New SKU"] == "GALAXY A35 5G A356 BDR BCL BLK"
+    assert result.loc[2, "Product New SKU"] == "GALAXY A16 5G A166 CP"
+    assert result.loc[3, "Product New SKU"] == "GALAXY A16 5G A166 CP INT"
+    assert result["SKU Duplicate"].eq("DUPLICATED").sum() == 0
+
+
 def test_pattern_generator_learns_frequent_ngrams(tmp_path: Path) -> None:
     input_path = tmp_path / "input.xlsx"
     output_path = tmp_path / "output.xlsx"
@@ -235,15 +426,15 @@ def test_pattern_generator_learns_frequent_ngrams(tmp_path: Path) -> None:
 
     engine = SKUIntelligenceEngine(
         EngineConfig(
-            ontology_file=Path("mobile_parts_ontology.json"),
-            dictionary_file=Path("mobile_parts_dictionary.json"),
-            part_rules_file=Path("part_code_rules.json"),
+            ontology_file=PARTS_ONTOLOGY_FILE,
+            dictionary_file=PARTS_DICTIONARY_FILE,
+            part_rules_file=PART_CODE_RULES_FILE,
             learned_patterns_file=learned_patterns_path,
             legacy_learned_title_patterns_file=tmp_path / "learned_title_patterns.json",
             legacy_learned_parts_file=tmp_path / "learned_parts.json",
             unknown_log_file=tmp_path / "unknown_parts_log.json",
             training_patterns_file=training_patterns_path,
-            spelling_corrections_file=Path("spelling_corrections.json"),
+            spelling_corrections_file=SPELLING_CORRECTIONS_FILE,
             learned_spelling_variations_file=tmp_path / "learned_spelling_variations.json",
             enable_vector_layer=False,
             pattern_min_frequency=5,
@@ -266,7 +457,7 @@ def test_max_tolerance_title_interpreter_examples() -> None:
     assert generate_sku("Samsng A52 Charng Port") == "GALAXY A52 CP"
     assert generate_sku("Galaxi A71 Ear Speker") == "GALAXY A71 ES"
     assert generate_sku("Samung A50 Vib Motor") == "GALAXY A50 VIB"
-    assert generate_sku("Pixl 7 Pro Sim Try") == "PIXEL 7 ST"
+    assert generate_sku("Pixl 7 Pro Sim Try") == "PIXEL 7 PRO ST"
     assert generate_sku("Smasung A30 Powr Volum Flex") == "GALAXY A30 PV-F"
 
 
@@ -295,3 +486,74 @@ def test_product_description_hint_can_drive_parsing_when_title_is_sparse() -> No
         "Samsung Galaxy A52 A525 Battery replacement part",
     )
     assert sku == "GALAXY A52 A525 BATT"
+
+
+def test_pixel_longest_model_detection_stays_specific() -> None:
+    assert analyze_title("pixel 8 pro ear speaker")["model"] == "PIXEL 8 PRO"
+    assert analyze_title("pixel 8 ear speaker")["model"] == "PIXEL 8"
+
+
+def test_pixel_multi_model_compatibility_group_is_preserved() -> None:
+    assert (
+        generate_sku("Vibrator for Google Pixel 6 / 6A / 6 Pro / 7 / 7 Pro / 8 / 8 Pro")
+        == "PIXEL 6/6A/6PRO/7/7PRO/8/8PRO VIB"
+    )
+
+
+def test_pixel_title_normalization_removes_supplier_noise() -> None:
+    payload = analyze_title("Front Camera for Google Pixel 6 Pro replacement repair part")
+    assert payload["interpreted_title"] == "front camera pixel 6 pro"
+    assert payload["sku"] == "PIXEL 6 PRO FC"
+
+
+def test_pixel_color_extraction_keeps_full_color_words() -> None:
+    assert (
+        generate_sku("SIM Tray for Google Pixel 6 Pro (Stormy Black)")
+        == "PIXEL 6 PRO ST BLACK"
+    )
+
+
+def test_pixel_backdoor_uses_backdoor_literal_and_color() -> None:
+    assert (
+        generate_sku("Back Door for Google Pixel 6 Pro (Black)")
+        == "PIXEL 6 PRO BACKDOOR BLACK"
+    )
+
+
+def test_engine_applies_learned_sku_overrides(tmp_path: Path) -> None:
+    sku_overrides_path = tmp_path / "learned_sku_corrections.json"
+    sku_overrides_path.write_text(
+        json.dumps(
+            {
+                "sku_overrides": {
+                    "GALAXY A52 A525 ES": "GALAXY A52 A525 ES BLK",
+                },
+                "title_overrides": {
+                    "pixel 8 pro ear speaker": "PIXEL 8 PRO ES BLACK",
+                },
+            },
+            indent=2,
+            ensure_ascii=True,
+        ),
+        encoding="utf-8",
+    )
+
+    engine = SKUIntelligenceEngine(
+        EngineConfig(
+            ontology_file=PARTS_ONTOLOGY_FILE,
+            dictionary_file=PARTS_DICTIONARY_FILE,
+            part_rules_file=PART_CODE_RULES_FILE,
+            learned_patterns_file=tmp_path / "learned_patterns.json",
+            legacy_learned_title_patterns_file=tmp_path / "learned_title_patterns.json",
+            legacy_learned_parts_file=tmp_path / "learned_parts.json",
+            unknown_log_file=tmp_path / "unknown_parts_log.json",
+            training_patterns_file=tmp_path / "training_patterns.json",
+            spelling_corrections_file=SPELLING_CORRECTIONS_FILE,
+            learned_spelling_variations_file=tmp_path / "learned_spelling_variations.json",
+            learned_sku_corrections_file=sku_overrides_path,
+            enable_vector_layer=False,
+        )
+    )
+
+    assert engine.parse_title("Galaxy A52 A525 Ear Speaker").suggested_sku == "GALAXY A52 A525 ES BLK"
+    assert engine.parse_title("Pixel 8 Pro Ear Speaker").suggested_sku == "PIXEL 8 PRO ES BLACK"

@@ -1,0 +1,113 @@
+{
+    "sku_code": "BDR",
+    "label": "Back Door",
+    "detection_patterns": [
+        "back door",
+        "back cover",
+        "back glass",
+        "rear door",
+        "rear cover",
+        "rear glass",
+        "battery cover",
+        "battery door",
+        "back housing",
+        "rear housing",
+        "back panel",
+        "rear panel",
+        "back plate",
+        "rear plate",
+        "back casing",
+        "rear casing",
+        "back shell",
+        "rear shell",
+        "back lid",
+        "rear lid",
+        "battery back cover",
+        "battery back door",
+        "housing back",
+        "housing rear",
+        "back body",
+        "rear body",
+        "back chassis",
+        "back frame cover",
+        "glass back",
+        "bottom cover",
+        "back glass cover",
+        "rear glass cover",
+        "back glass panel",
+        "rear glass panel",
+        "back adhesive cover",
+        "back plastic cover",
+        "back aluminum cover",
+        "back titanium cover",
+        "back ceramic cover",
+        "back glass door",
+        "rear glass door"
+    ],
+    "with_camera_lens_patterns": [
+        "with camera lens",
+        "with cam lens",
+        "with rear camera lens",
+        "with back camera lens",
+        "with camera glass",
+        "with cam glass",
+        "with lens",
+        "camera lens included",
+        "cam lens included",
+        "with camera cover",
+        "including camera lens",
+        "camera lens attached",
+        "with back cam lens",
+        "with rear cam lens",
+        "with camera protector",
+        "with glass lens",
+        "lens included",
+        "camera glass included",
+        "with camera module glass",
+        "+ camera lens",
+        "+ cam lens",
+        "+ lens",
+        "incl camera lens",
+        "c/w camera lens",
+        "and camera lens",
+        "& camera lens",
+        "& lens"
+    ],
+    "camera_lens_sku_suffix": "BCL",
+    "attribute_extraction_order": [
+        "color",
+        "camera_lens"
+    ],
+    "sku_format_rules": {
+        "color_only": "{MODEL} BDR {COLOR}",
+        "camera_lens_only": "{MODEL} BDR BCL",
+        "color_and_camera_lens": "{MODEL} BDR {COLOR} BCL",
+        "no_attribute": "{MODEL} BDR"
+    },
+    "examples": [
+        {
+            "title": "iPhone 13 Pro Back Door Sierra Blue",
+            "sku": "IPHONE 13 PRO BDR SIERRA BLUE"
+        },
+        {
+            "title": "iPhone 13 Pro Back Door with Camera Lens",
+            "sku": "IPHONE 13 PRO BDR BCL"
+        },
+        {
+            "title": "Samsung Galaxy S21 Back Cover Phantom Black with Camera Lens",
+            "sku": "GALAXY S21 G991 BDR PHANTOM BLACK BCL"
+        },
+        {
+            "title": "iPhone 14 Pro Max Back Glass Natural Titanium",
+            "sku": "IPHONE 14 PM BDR NATURAL TITANIUM"
+        },
+        {
+            "title": "Google Pixel 7 Back Cover Black",
+            "sku": "PIXEL 7 BDR BLACK"
+        },
+        {
+            "title": "Samsung Galaxy A52 Battery Cover Blue",
+            "sku": "GALAXY A52 A525 BDR BLUE"
+        }
+    ]
+}

@@ -20,7 +20,15 @@ from typing import Any
 
 import pandas as pd
 
-from sku_intelligence_engine import EngineConfig, NOT_UNDERSTANDABLE, SKUIntelligenceEngine
+from .sku_intelligence_engine import (
+    EngineConfig,
+    NOT_UNDERSTANDABLE,
+    PARTS_DICTIONARY_FILE,
+    PARTS_ONTOLOGY_FILE,
+    PART_CODE_RULES_FILE,
+    SPELLING_CORRECTIONS_FILE,
+    SKUIntelligenceEngine,
+)
 
 
 @dataclass
@@ -117,16 +125,18 @@ class SKUValidationFramework:
         self.workspace_dir.mkdir(parents=True, exist_ok=True)
 
         required_copy_files = [
-            "mobile_parts_ontology.json",
-            "mobile_parts_dictionary.json",
-            "part_code_rules.json",
-            "spelling_corrections.json",
+            ("mobile_parts_ontology.json", PARTS_ONTOLOGY_FILE),
+            ("mobile_parts_dictionary.json", PARTS_DICTIONARY_FILE),
+            ("part_code_rules.json", PART_CODE_RULES_FILE),
+            ("spelling_corrections.json", SPELLING_CORRECTIONS_FILE),
         ]
-        for filename in required_copy_files:
-            src = self.base_dir / filename
+        for filename, fallback_src in required_copy_files:
+            src = self.base_dir / "data" / "core" / filename
+            if not src.exists():
+                src = fallback_src
             if not src.exists():
                 raise FileNotFoundError(f"Required file not found: {src}")
-            shutil.copy2(src, self.workspace_dir / filename)
+            shutil.copy2(src, self.workspace_dir / src.name)
 
         self._write_json(self.workspace_dir / "learned_patterns.json", {})
         self._write_json(self.workspace_dir / "learned_title_patterns.json", {})
@@ -767,7 +777,7 @@ def run_validation_suite(
     performance_sizes: tuple[int, ...] = (1000, 10000, 100000),
     performance_threshold_seconds: dict[int, float] | None = None,
 ) -> dict[str, Any]:
-    base_dir = Path(__file__).resolve().parent
+    base_dir = Path(__file__).resolve().parent.parent
     config = FrameworkConfig(
         include_performance=include_performance,
         enable_vector_layer=enable_vector_layer,

@@ -1,15 +1,16 @@
 "use client";
 
 import { useState, useEffect, useMemo, useRef } from "react";
+import Link from "next/link";
 import { FileUploader } from "@/components/FileUploader";
 import { ParserControls } from "@/components/ParserControls";
 import { ResultsTable } from "@/components/ResultsTable";
-import { analyzeTitle, parseInventory, downloadProcessedFileUrl, generateSingleSku } from "@/lib/api";
+import { analyzeTitle, parseInventory, downloadProcessedFileUrl } from "@/lib/api";
 import { AnalyzeTitleResponse, ParseResponse } from "@/types";
-import { AlertTriangle, CheckCircle2, Box, Loader2 } from "lucide-react";
+import { AlertTriangle, CheckCircle2, Box, Loader2, Clipboard, ClipboardCheck, Sparkles, CircleAlert } from "lucide-react";
 
 function confidenceMeta(confidence: number) {
-  if (confidence > 0.9) {
+  if (confidence >= 0.9) {
     return {
       label: "High",
       badgeClass: "bg-emerald-100 text-emerald-700 border-emerald-200",
@@ -78,29 +79,22 @@ export default function Dashboard() {
   const [data, setData] = useState<ParseResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [singleTitle, setSingleTitle] = useState("");
-  const [singleProductSku, setSingleProductSku] = useState("");
-  const [singleWebSku, setSingleWebSku] = useState("");
-  const [singleDescription, setSingleDescription] = useState("");
-  const [singleSkuResult, setSingleSkuResult] = useState<string | null>(null);
-  const [singleStatus, setSingleStatus] = useState<"parsed" | "not_understandable" | null>(null);
-  const [singleError, setSingleError] = useState<string | null>(null);
-  const [isGeneratingSingle, setIsGeneratingSingle] = useState(false);
   const [singleAnalysis, setSingleAnalysis] = useState<AnalyzeTitleResponse | null>(null);
   const [singleAnalysisError, setSingleAnalysisError] = useState<string | null>(null);
   const [isAnalyzingSingle, setIsAnalyzingSingle] = useState(false);
+  const [analysisUpdatedAt, setAnalysisUpdatedAt] = useState<number | null>(null);
+  const [isSkuCopied, setIsSkuCopied] = useState(false);
   const latestSingleAnalysisRequestRef = useRef(0);
 
   useEffect(() => {
     const title = singleTitle.trim();
-    const productSku = singleProductSku.trim();
-    const productWebSku = singleWebSku.trim();
-    const productDescription = singleDescription.trim();
 
-    if (!title && !productSku && !productWebSku && !productDescription) {
+    if (!title) {
       latestSingleAnalysisRequestRef.current += 1;
       setSingleAnalysis(null);
       setSingleAnalysisError(null);
       setIsAnalyzingSingle(false);
+      setAnalysisUpdatedAt(null);
       return;
     }
 
@@ -113,9 +107,6 @@ export default function Dashboard() {
       try {
         const response = await analyzeTitle({
           title,
-          product_sku: productSku,
-          product_web_sku: productWebSku,
-          product_description: productDescription,
         });
 
         if (latestSingleAnalysisRequestRef.current !== requestId) {
@@ -123,6 +114,8 @@ export default function Dashboard() {
         }
 
         setSingleAnalysis(response);
+        setAnalysisUpdatedAt(Date.now());
+        setIsSkuCopied(false);
         if (response.parse_status === "not_understandable") {
           setSingleAnalysisError("Unable to interpret title");
         }
@@ -130,13 +123,13 @@ export default function Dashboard() {
         if (latestSingleAnalysisRequestRef.current !== requestId) {
           return;
         }
-        console.error(err);
         setSingleAnalysis(null);
+        setAnalysisUpdatedAt(null);
         setSingleAnalysisError(
           getApiErrorMessage(
             err,
             "Unable to interpret title",
-            "http://127.0.0.1:8000",
+            "http://127.0.0.1:5000",
           ),
         );
       } finally {
@@ -147,7 +140,7 @@ export default function Dashboard() {
     }, 350);
 
     return () => window.clearTimeout(timeout);
-  }, [singleTitle, singleProductSku, singleWebSku, singleDescription]);
+  }, [singleTitle]);
 
   // Drag and drop handlers
   const handleDragEnter = (e: React.DragEvent) => {
@@ -206,7 +199,6 @@ export default function Dashboard() {
       const response = await parseInventory(file);
       setData(response);
     } catch (err) {
-      console.error(err);
       setError(
         getApiErrorMessage(
           err,
@@ -235,52 +227,28 @@ export default function Dashboard() {
     document.body.removeChild(link);
   };
 
-  const handleGenerateSingleSku = async () => {
-    if (!singleTitle.trim() && !singleProductSku.trim() && !singleWebSku.trim() && !singleDescription.trim()) {
-      setSingleError("Enter a title or SKU hint first.");
-      return;
-    }
-
-    setIsGeneratingSingle(true);
-    setSingleError(null);
-
-    try {
-      const response = await generateSingleSku({
-        title: singleTitle,
-        product_sku: singleProductSku,
-        product_web_sku: singleWebSku,
-        product_description: singleDescription,
-      });
-      setSingleSkuResult(response.generated_sku);
-      setSingleStatus(response.parse_status);
-    } catch (err) {
-      console.error(err);
-      setSingleError(
-        getApiErrorMessage(
-          err,
-          "Failed to generate SKU. Check server status.",
-          "http://127.0.0.1:5000",
-        ),
-      );
-      setSingleSkuResult(null);
-      setSingleStatus(null);
-    } finally {
-      setIsGeneratingSingle(false);
-    }
-  };
-
   const handleClearSingleSku = () => {
     latestSingleAnalysisRequestRef.current += 1;
     setSingleTitle("");
-    setSingleProductSku("");
-    setSingleWebSku("");
-    setSingleDescription("");
-    setSingleSkuResult(null);
-    setSingleStatus(null);
-    setSingleError(null);
     setSingleAnalysis(null);
     setSingleAnalysisError(null);
     setIsAnalyzingSingle(false);
+    setAnalysisUpdatedAt(null);
+    setIsSkuCopied(false);
+  };
+
+  const handleCopySku = async () => {
+    const sku = singleAnalysis?.sku?.trim();
+    if (!sku) {
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(sku);
+      setIsSkuCopied(true);
+      window.setTimeout(() => setIsSkuCopied(false), 1400);
+    } catch {
+      setIsSkuCopied(false);
+    }
   };
 
   const singleConfidencePercent = useMemo(() => {
@@ -323,26 +291,103 @@ export default function Dashboard() {
   const singleConfidence = singleAnalysis?.confidence ?? 0;
   const singleConfidenceUi = confidenceMeta(singleConfidence);
 
+  const singleAnalysisStatusMeta = useMemo(() => {
+    if (isAnalyzingSingle) {
+      return {
+        label: "Parsing",
+        className: "bg-blue-100 text-blue-700 border-blue-200",
+        hint: "Live parser is running",
+      };
+    }
+    if (singleAnalysisError) {
+      return {
+        label: "Error",
+        className: "bg-rose-100 text-rose-700 border-rose-200",
+        hint: "Could not parse this title",
+      };
+    }
+    if (!singleAnalysis) {
+      return {
+        label: "Idle",
+        className: "bg-gray-100 text-gray-600 border-gray-200",
+        hint: "Start typing to analyze",
+      };
+    }
+    if (singleAnalysis.parse_status === "not_understandable") {
+      return {
+        label: "Unclear",
+        className: "bg-rose-100 text-rose-700 border-rose-200",
+        hint: "Needs clearer part/model wording",
+      };
+    }
+    if ((singleAnalysis.confidence ?? 0) >= 0.9) {
+      return {
+        label: "Ready",
+        className: "bg-emerald-100 text-emerald-700 border-emerald-200",
+        hint: "High-confidence parse",
+      };
+    }
+    return {
+      label: "Review",
+      className: "bg-amber-100 text-amber-700 border-amber-200",
+      hint: "Verify before final save",
+    };
+  }, [isAnalyzingSingle, singleAnalysisError, singleAnalysis]);
+
+  const analysisCardTone = useMemo(() => {
+    if (singleAnalysisError || singleAnalysis?.parse_status === "not_understandable") {
+      return "border-rose-200 bg-white shadow-sm ring-1 ring-rose-50";
+    }
+    if ((singleAnalysis?.confidence ?? 0) >= 0.9) {
+      return "border-emerald-200 bg-white shadow-sm ring-1 ring-emerald-50";
+    }
+    if ((singleAnalysis?.confidence ?? 0) > 0) {
+      return "border-amber-200 bg-white shadow-sm ring-1 ring-amber-50";
+    }
+    return "border-gray-200 bg-gray-50/50";
+  }, [singleAnalysisError, singleAnalysis]);
+
+
+
+  const analysisUpdatedLabel = useMemo(() => {
+    if (!analysisUpdatedAt) {
+      return "";
+    }
+    return new Date(analysisUpdatedAt).toLocaleTimeString([], {
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+    });
+  }, [analysisUpdatedAt]);
+
   return (
     <div className="min-h-screen bg-[#f8faf9] font-sans text-gray-900 pb-20">
       {/* Header */}
       <header className="bg-white border-b border-gray-200 sticky top-0 z-10">
-        <div className="max-w-[1600px] mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center gap-3">
-          <div className="w-8 h-8 rounded-lg bg-emerald-600 flex items-center justify-center text-white shadow-sm">
-            <Box size={18} />
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between gap-3">
+          <div className="flex items-center gap-3">
+            <div className="w-8 h-8 rounded-lg bg-emerald-600 flex items-center justify-center text-white shadow-sm">
+              <Box size={18} />
+            </div>
+            <div>
+              <h1 className="text-xl font-bold font-sans tracking-tight text-gray-900 leading-tight">
+                SKU Parser Engine
+              </h1>
+              <p className="text-xs text-gray-500 font-medium tracking-wide uppercase">
+                Mobile Parts Inventory Parser
+              </p>
+            </div>
           </div>
-          <div>
-            <h1 className="text-xl font-bold font-sans tracking-tight text-gray-900 leading-tight">
-              SKU Parser Engine
-            </h1>
-            <p className="text-xs text-gray-500 font-medium tracking-wide uppercase">
-              Mobile Parts Inventory Parser
-            </p>
-          </div>
+          <Link
+            href="/training"
+            className="rounded-lg border border-gray-300 px-3 py-1.5 text-sm font-medium text-gray-700 transition hover:bg-gray-100"
+          >
+            Training Dashboard
+          </Link>
         </div>
       </header>
 
-      <main className="max-w-[1600px] mx-auto px-4 sm:px-6 lg:px-8 mt-6 space-y-6">
+      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 mt-6 space-y-6">
 
         {/* Error Alert */}
         {error && (
@@ -381,89 +426,48 @@ export default function Dashboard() {
               </div>
 
               <div className="space-y-3">
-                <div>
+                <div className="flex items-center justify-between">
                   <label className="text-xs font-semibold text-gray-600 uppercase tracking-wide">
                     Product Title
                   </label>
+                  <button
+                    onClick={handleClearSingleSku}
+                    disabled={isAnalyzingSingle}
+                    className="text-xs font-medium text-gray-500 hover:text-gray-700 transition-colors disabled:opacity-50"
+                  >
+                    Clear
+                  </button>
+                </div>
+                <div className="mt-1">
                   <textarea
                     value={singleTitle}
                     onChange={(e) => setSingleTitle(e.target.value)}
                     rows={3}
-                    className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900 focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-200"
+                    className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900 focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-200"
                     placeholder="Type a product title..."
                   />
                 </div>
-
-                <div>
-                  <label className="text-xs font-semibold text-gray-600 uppercase tracking-wide">
-                    Product SKU (optional)
-                  </label>
-                  <input
-                    value={singleProductSku}
-                    onChange={(e) => setSingleProductSku(e.target.value)}
-                    className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900 focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-200"
-                    placeholder="A525PBF"
-                  />
-                </div>
-
-                <div>
-                  <label className="text-xs font-semibold text-gray-600 uppercase tracking-wide">
-                    Product Description (optional)
-                  </label>
-                  <textarea
-                    value={singleDescription}
-                    onChange={(e) => setSingleDescription(e.target.value)}
-                    rows={2}
-                    className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900 focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-200"
-                    placeholder="Extra description text to improve parsing..."
-                  />
-                </div>
               </div>
 
-              {singleError && (
-                <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
-                  {singleError}
-                </div>
-              )}
-
-              {singleSkuResult && (
-                <div
-                  className={`rounded-lg border px-3 py-2 ${singleStatus === "parsed"
-                    ? "border-emerald-200 bg-emerald-50 text-emerald-800"
-                    : "border-amber-200 bg-amber-50 text-amber-800"
-                    }`}
-                >
-                  <p className="text-xs font-semibold uppercase tracking-wide">Generated SKU (Manual Run)</p>
-                  <p className="text-base font-bold">{singleSkuResult}</p>
-                </div>
-              )}
-
-              <div className="flex flex-col sm:flex-row gap-2">
-                <button
-                  onClick={handleGenerateSingleSku}
-                  disabled={isGeneratingSingle}
-                  className="w-full sm:w-auto flex items-center justify-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2.5 rounded-lg font-medium transition-colors disabled:opacity-70 disabled:cursor-not-allowed"
-                >
-                  {isGeneratingSingle ? "Generating..." : "Generate SKU"}
-                </button>
-                <button
-                  onClick={handleClearSingleSku}
-                  disabled={isGeneratingSingle}
-                  className="w-full sm:w-auto flex items-center justify-center gap-2 bg-white hover:bg-gray-50 text-gray-700 border border-gray-200 px-4 py-2.5 rounded-lg font-medium transition-colors disabled:opacity-50"
-                >
-                  Clear
-                </button>
-              </div>
-
-              <div className="rounded-xl border border-gray-200 p-4 space-y-3">
+              <div className={`rounded-xl border p-4 space-y-3 transition-colors ${analysisCardTone}`}>
                 <div className="flex items-center justify-between gap-3">
-                  <h3 className="text-sm font-semibold text-gray-900">Live Analysis</h3>
-                  {isAnalyzingSingle && (
-                    <div className="inline-flex items-center gap-1.5 rounded-full border border-gray-200 bg-gray-50 px-2.5 py-1 text-xs font-semibold text-gray-600">
-                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                      Parsing
-                    </div>
-                  )}
+                  <div>
+                    <h3 className="text-sm font-semibold text-gray-900">Live Analysis</h3>
+                    <p className="text-[11px] text-gray-500">
+                      Uses the same parser engine and ontology as bulk processing.
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    {analysisUpdatedLabel && (
+                      <span className="text-[11px] text-gray-500">Updated {analysisUpdatedLabel}</span>
+                    )}
+                    <span className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-semibold ${singleAnalysisStatusMeta.className}`}>
+                      {isAnalyzingSingle && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+                      {!isAnalyzingSingle && singleAnalysisStatusMeta.label === "Ready" && <Sparkles className="h-3.5 w-3.5" />}
+                      {!isAnalyzingSingle && singleAnalysisStatusMeta.label !== "Ready" && singleAnalysisStatusMeta.label !== "Idle" && <CircleAlert className="h-3.5 w-3.5" />}
+                      {singleAnalysisStatusMeta.label}
+                    </span>
+                  </div>
                 </div>
 
                 {singleAnalysisError ? (
@@ -471,39 +475,35 @@ export default function Dashboard() {
                     {singleAnalysisError}
                   </div>
                 ) : singleAnalysis ? (
-                  <div className="space-y-2.5">
+                  <div className="space-y-4">
                     {/* SKU + Confidence row */}
-                    <div className="flex items-center justify-between gap-3 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2">
+                    <div className="flex items-center justify-between gap-3 rounded-xl border border-gray-200 bg-white shadow-sm px-4 py-3">
                       <div>
-                        <p className="text-[10px] font-semibold uppercase tracking-wide text-gray-400">SKU</p>
-                        <p className="text-sm font-bold text-gray-900">{singleAnalysis.sku || "—"}</p>
+                        <p className="text-[10px] font-semibold uppercase tracking-widest text-gray-400 mb-0.5">SKU Generated</p>
+                        <p className="text-lg font-bold text-gray-900 tracking-tight">{singleAnalysis.sku || "—"}</p>
                       </div>
-                      <div className="flex items-center gap-2 shrink-0">
-                        <span className={`text-xs font-semibold px-2 py-0.5 rounded-full border ${singleConfidenceUi.badgeClass}`}>
-                          {singleConfidencePercent}% · {singleConfidenceUi.label}
-                        </span>
-                        <div className="w-16 h-1.5 overflow-hidden rounded-full bg-gray-200">
+                      <div className="flex flex-col items-end gap-2 shrink-0">
+                        <div className="flex items-center gap-2">
+                          <span className={`text-xs font-semibold px-2 py-0.5 rounded-full border ${singleConfidenceUi.badgeClass}`}>
+                            {singleConfidencePercent}% · {singleConfidenceUi.label}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={handleCopySku}
+                            disabled={!singleAnalysis.sku}
+                            className="inline-flex items-center justify-center h-7 w-7 rounded-md border border-gray-200 bg-gray-50 text-gray-600 transition-colors hover:bg-gray-100 disabled:cursor-not-allowed disabled:opacity-50"
+                            title="Copy SKU"
+                          >
+                            {isSkuCopied ? <ClipboardCheck className="h-4 w-4 text-emerald-600" /> : <Clipboard className="h-4 w-4" />}
+                          </button>
+                        </div>
+                        <div className="w-24 h-1.5 overflow-hidden rounded-full bg-gray-100">
                           <div className={`h-full rounded-full transition-all ${singleConfidenceUi.barClass}`} style={{ width: `${singleConfidencePercent}%` }} />
                         </div>
                       </div>
                     </div>
 
-                    {/* Details grid */}
-                    <div className="grid grid-cols-3 gap-2 text-xs">
-                      {[
-                        { label: "Brand", value: singleAnalysis.brand },
-                        { label: "Model", value: singleAnalysis.model },
-                        { label: "Code", value: singleAnalysis.model_code },
-                        { label: "Part", value: singleAnalysis.primary_part || singleAnalysis.part },
-                        { label: "Sub-part", value: singleAnalysis.secondary_part },
-                        { label: "Reason", value: singleAnalysis.parser_reason },
-                      ].map(({ label, value }) => (
-                        <div key={label} className="rounded-md border border-gray-100 bg-gray-50 px-2 py-1.5">
-                          <p className="text-[10px] font-semibold uppercase tracking-wide text-gray-400">{label}</p>
-                          <p className="truncate font-semibold text-gray-800">{value || "—"}</p>
-                        </div>
-                      ))}
-                    </div>
+
 
                     {/* Spelling corrections — only shown when present */}
                     {singleCorrectionPairs.length > 0 && (
@@ -520,9 +520,13 @@ export default function Dashboard() {
                         ))}
                       </div>
                     )}
+
                   </div>
                 ) : (
-                  <p className="text-xs text-gray-400">Start typing to see live analysis.</p>
+                  <div className="rounded-lg border border-gray-200 bg-gray-50 p-3 text-xs text-gray-500">
+                    <p className="font-semibold text-gray-700 mb-1">Start typing to see live analysis.</p>
+                    <p>{singleAnalysisStatusMeta.hint}</p>
+                  </div>
                 )}
               </div>
             </div>

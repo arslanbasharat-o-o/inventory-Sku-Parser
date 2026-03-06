@@ -38,7 +38,7 @@ except ImportError:  # pragma: no cover
 # ---------------------------------------------------------------------------
 # Internal rule-based engine
 # ---------------------------------------------------------------------------
-from sku_parser import NOT_UNDERSTANDABLE, analyze_title as _rule_analyze
+from .sku_parser import NOT_UNDERSTANDABLE, analyze_title as _rule_analyze
 
 logger = logging.getLogger(__name__)
 

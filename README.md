@@ -18,11 +18,11 @@ Production-grade SKU intelligence engine for mobile phone repair parts inventory
 - Generates validation reports for parser quality and performance.
 
 ## Architecture
-- `app.py`: Flask API for bulk parser workflow and downloads.
-- `fastapi_app.py`: FastAPI live analyzer and structured parser endpoints.
-- `structured_sku_parser.py`: rule-first parser with OpenAI structured fallback.
-- `sku_intelligence_engine.py`: core parsing logic and learning subsystems.
-- `sku_validation_framework.py`: full validation suite and report generator.
+- `backend/app.py`: Flask API for bulk parser workflow and downloads.
+- `backend/fastapi_app.py`: FastAPI live analyzer and structured parser endpoints.
+- `backend/structured_sku_parser.py`: rule-first parser with OpenAI structured fallback.
+- `backend/sku_intelligence_engine.py`: core parsing logic and learning subsystems.
+- `backend/sku_validation_framework.py`: full validation suite and report generator.
 - `frontend/`: Next.js dashboard.
 
 ## Quick Start
@@ -36,12 +36,12 @@ pip install -r requirements.txt
 
 ### 2) Run Flask bulk parser service
 ```bash
-python app.py
+python -m backend.app
 ```
 
 ### 3) Run FastAPI live analyzer service
 ```bash
-uvicorn fastapi_app:app --host 0.0.0.0 --port 8000 --reload
+uvicorn backend.fastapi_app:app --host 0.0.0.0 --port 8000 --reload
 ```
 
 ### 4) Run Next.js frontend
@@ -64,7 +64,7 @@ npm run dev
 ## Validation
 Run full parser validation:
 ```bash
-python sku_validation_framework.py --strict
+python -m backend.sku_validation_framework --strict
 ```
 
 Generated reports:

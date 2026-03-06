@@ -15,10 +15,16 @@ import pandas as pd
 from flask import Flask, flash, redirect, render_template, request, send_file, url_for
 from werkzeug.utils import secure_filename
 
-from sku_parser import NOT_UNDERSTANDABLE, UNKNOWN_LOG_FILE, generate_sku, process_inventory
+from .sku_parser import (
+    NOT_UNDERSTANDABLE,
+    UNKNOWN_LOG_FILE,
+    analyze_title,
+    generate_sku,
+    process_inventory,
+)
+from .training_dashboard_service import TrainingDashboardService
 
-
-BASE_DIR = Path(__file__).resolve().parent
+BASE_DIR = Path(__file__).resolve().parent.parent
 DATA_DIR = Path(os.getenv("SKU_PARSER_DATA_DIR", str(BASE_DIR))).resolve()
 UPLOAD_DIR = DATA_DIR / "uploads"
 OUTPUT_DIR = DATA_DIR / "outputs"
@@ -47,6 +53,9 @@ def create_app() -> Flask:
     app.config["SECRET_KEY"] = os.getenv("FLASK_SECRET_KEY", "sku-parser-dev-key")
     UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    training_service = TrainingDashboardService(
+        structured_log_db_path=Path(os.getenv("SKU_PARSE_DB_PATH", "outputs/structured_sku_results.db"))
+    )
 
     @app.route("/", methods=["GET", "POST"])
     def index():
@@ -187,6 +196,61 @@ def create_app() -> Flask:
             "parse_status": "parsed" if sku != NOT_UNDERSTANDABLE else "not_understandable",
         }
 
+    @app.route("/analyze-title", methods=["POST"])
+    def analyze_title_api():
+        payload = request.get_json(silent=True) or {}
+        title = str(payload.get("title", "")).strip()
+        product_sku = str(payload.get("product_sku", "")).strip()
+        product_web_sku = str(payload.get("product_web_sku", "")).strip()
+        product_description = str(payload.get("product_description", "")).strip()
+
+        if not title and not product_sku and not product_web_sku and not product_description:
+            return {"error": "Provide at least a title or SKU hint."}, 400
+
+        try:
+            parsed = analyze_title(
+                title,
+                product_sku_hint=product_sku,
+                product_web_sku_hint=product_web_sku,
+                product_description_hint=product_description,
+            )
+        except Exception as exc:
+            return {"error": f"Failed to analyze title: {exc}"}, 500
+
+        confidence = float(parsed.get("confidence", 0.0) or 0.0)
+        part = str(parsed.get("part", "")).strip().upper()
+        secondary_part = str(parsed.get("secondary_part", "")).strip().upper()
+        raw_corrections = parsed.get("corrections", [])
+        correction_pairs = []
+        if isinstance(raw_corrections, list):
+            for item in raw_corrections:
+                if not isinstance(item, dict):
+                    continue
+                from_token = str(item.get("from", "")).strip()
+                to_token = str(item.get("to", "")).strip()
+                if from_token or to_token:
+                    correction_pairs.append({"from": from_token, "to": to_token})
+
+        return {
+            "brand": str(parsed.get("brand", "")).strip().upper(),
+            "model": str(parsed.get("model", "")).strip().upper(),
+            "model_code": str(parsed.get("model_code", "")).strip().upper(),
+            "primary_part": part,
+            "part": part,
+            "secondary_part": secondary_part or None,
+            "sku": str(parsed.get("sku", NOT_UNDERSTANDABLE)).strip().upper(),
+            "confidence": confidence,
+            "corrections": raw_corrections if isinstance(raw_corrections, list) else [],
+            "correction_pairs": correction_pairs,
+            "interpreted_title": str(parsed.get("interpreted_title", title)).strip(),
+            "parser_reason": str(parsed.get("reason", "rule_parser")).strip(),
+            "source": "rule",
+            "review_required": confidence < 0.75,
+            "needs_review": confidence < 0.75,
+            "decision": str(parsed.get("decision", "")).strip(),
+            "parse_status": str(parsed.get("parse_status", "not_understandable")).strip().lower(),
+        }
+
     @app.route("/healthz", methods=["GET"])
     def healthz():
         return {
@@ -194,6 +258,171 @@ def create_app() -> Flask:
             "service": "sku-parser-api",
             "timestamp": datetime.now().isoformat(timespec="seconds"),
         }
+
+    @app.route("/admin/training/bootstrap", methods=["GET"])
+    def admin_training_bootstrap():
+        try:
+            return training_service.get_bootstrap()
+        except Exception as exc:
+            return {"error": f"Failed to load training dashboard data: {exc}"}, 500
+
+    @app.route("/admin/training/analytics", methods=["GET"])
+    def admin_training_analytics():
+        try:
+            return training_service.get_analytics()
+        except Exception as exc:
+            return {"error": f"Failed to load analytics: {exc}"}, 500
+
+    @app.route("/admin/training/title-training", methods=["POST"])
+    def admin_training_title_training():
+        payload = request.get_json(silent=True) or {}
+        try:
+            product_title = str(payload.get("product_title", "")).strip()
+            expected_sku = str(payload.get("expected_sku", "")).strip()
+            if not product_title or not expected_sku:
+                return {"error": "product_title and expected_sku are required."}, 400
+            return training_service.add_title_training_sample(
+                product_title=product_title,
+                detected_model=str(payload.get("detected_model", "")),
+                detected_part=str(payload.get("detected_part", "")),
+                detected_color=str(payload.get("detected_color", "")),
+                expected_sku=expected_sku,
+            )
+        except ValueError as exc:
+            return {"error": str(exc)}, 400
+        except Exception as exc:
+            return {"error": f"Failed to save title training sample: {exc}"}, 500
+
+    @app.route("/admin/training/synonym", methods=["POST"])
+    def admin_training_synonym():
+        payload = request.get_json(silent=True) or {}
+        try:
+            supplier_phrase = str(payload.get("supplier_phrase", "")).strip()
+            standard_term = str(payload.get("standard_term", "")).strip()
+            if not supplier_phrase or not standard_term:
+                return {"error": "supplier_phrase and standard_term are required."}, 400
+            return training_service.add_synonym_mapping(
+                supplier_phrase=supplier_phrase,
+                standard_term=standard_term,
+            )
+        except ValueError as exc:
+            return {"error": str(exc)}, 400
+        except Exception as exc:
+            return {"error": f"Failed to save synonym mapping: {exc}"}, 500
+
+    @app.route("/admin/training/spelling", methods=["POST"])
+    def admin_training_spelling():
+        payload = request.get_json(silent=True) or {}
+        try:
+            incorrect_word = str(payload.get("incorrect_word", "")).strip()
+            correct_word = str(payload.get("correct_word", "")).strip()
+            if not incorrect_word or not correct_word:
+                return {"error": "incorrect_word and correct_word are required."}, 400
+            return training_service.add_spelling_correction(
+                incorrect_word=incorrect_word,
+                correct_word=correct_word,
+            )
+        except ValueError as exc:
+            return {"error": str(exc)}, 400
+        except Exception as exc:
+            return {"error": f"Failed to save spelling correction: {exc}"}, 500
+
+    @app.route("/admin/training/part-ontology", methods=["POST"])
+    def admin_training_part_ontology():
+        payload = request.get_json(silent=True) or {}
+        try:
+            phrase = str(payload.get("phrase", "")).strip()
+            sku_code = str(payload.get("sku_code", "")).strip()
+            if not phrase or not sku_code:
+                return {"error": "phrase and sku_code are required."}, 400
+            return training_service.add_part_mapping(phrase=phrase, sku_code=sku_code)
+        except ValueError as exc:
+            return {"error": str(exc)}, 400
+        except Exception as exc:
+            return {"error": f"Failed to save part mapping: {exc}"}, 500
+
+    @app.route("/admin/training/color", methods=["POST"])
+    def admin_training_color():
+        payload = request.get_json(silent=True) or {}
+        try:
+            supplier_color = str(payload.get("supplier_color", "")).strip()
+            standard_color = str(payload.get("standard_color", "")).strip()
+            if not supplier_color or not standard_color:
+                return {"error": "supplier_color and standard_color are required."}, 400
+            return training_service.add_color_mapping(
+                supplier_color=supplier_color,
+                standard_color=standard_color,
+            )
+        except ValueError as exc:
+            return {"error": str(exc)}, 400
+        except Exception as exc:
+            return {"error": f"Failed to save color mapping: {exc}"}, 500
+
+    @app.route("/admin/training/sku-correction", methods=["POST"])
+    def admin_training_sku_correction():
+        payload = request.get_json(silent=True) or {}
+        try:
+            generated_sku = str(payload.get("generated_sku", "")).strip()
+            correct_sku = str(payload.get("correct_sku", "")).strip()
+            title = str(payload.get("title", "")).strip()
+            if not generated_sku or not correct_sku:
+                return {"error": "generated_sku and correct_sku are required."}, 400
+            return training_service.add_sku_correction(
+                generated_sku=generated_sku,
+                correct_sku=correct_sku,
+                title=title,
+            )
+        except ValueError as exc:
+            return {"error": str(exc)}, 400
+        except Exception as exc:
+            return {"error": f"Failed to save SKU correction: {exc}"}, 500
+
+    @app.route("/admin/training/rule", methods=["POST"])
+    def admin_training_rule():
+        payload = request.get_json(silent=True) or {}
+        try:
+            rule_text = str(payload.get("rule_text", "")).strip()
+            if not rule_text:
+                return {"error": "rule_text is required."}, 400
+            return training_service.add_rule(rule_text=rule_text)
+        except ValueError as exc:
+            return {"error": str(exc)}, 400
+        except Exception as exc:
+            return {"error": f"Failed to save rule: {exc}"}, 500
+
+    @app.route("/admin/training/live-test", methods=["POST"])
+    def admin_training_live_test():
+        payload = request.get_json(silent=True) or {}
+        title = str(payload.get("title", "")).strip()
+        if not title:
+            return {"error": "title is required."}, 400
+        try:
+            return training_service.live_test(title)
+        except Exception as exc:
+            return {"error": f"Live test failed: {exc}"}, 500
+
+    @app.route("/admin/training/upload-dataset", methods=["POST"])
+    def admin_training_upload_dataset():
+        uploaded_file = request.files.get("file")
+        if uploaded_file is None or not uploaded_file.filename:
+            return {"error": "No file included."}, 400
+
+        input_name = secure_filename(uploaded_file.filename)
+        extension = Path(input_name).suffix.lower()
+        if extension not in {".xlsx", ".xls", ".csv"}:
+            return {"error": "Invalid file type. Upload .xlsx, .xls, or .csv."}, 400
+
+        file_id = uuid.uuid4().hex
+        input_path = UPLOAD_DIR / f"{file_id}_{input_name}"
+        try:
+            uploaded_file.save(input_path)
+            return training_service.upload_training_dataset(input_path)
+        except ValueError as exc:
+            return {"error": str(exc)}, 400
+        except Exception as exc:
+            return {"error": f"Dataset upload training failed: {exc}"}, 500
+        finally:
+            input_path.unlink(missing_ok=True)
 
     @app.route("/readyz", methods=["GET"])
     def readyz():

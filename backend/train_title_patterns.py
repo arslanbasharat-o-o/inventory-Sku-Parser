@@ -5,13 +5,14 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 from collections import Counter, defaultdict
 from pathlib import Path
 
 import pandas as pd
 
-from sku_parser import (
+from .sku_parser import (
     DEFAULT_MOBILE_PARTS_DICTIONARY,
     DEFAULT_PART_CODE_RULES,
     PARTS_DICTIONARY_FILE,
@@ -20,7 +21,10 @@ from sku_parser import (
 )
 
 
-LEARNED_TITLE_PATTERNS_FILE = Path("learned_title_patterns.json")
+DATA_ROOT_DIR = Path(
+    os.getenv("SKU_DATA_DIR", str(Path(__file__).resolve().parent.parent / "data"))
+).resolve()
+LEARNED_TITLE_PATTERNS_FILE = DATA_ROOT_DIR / "runtime" / "learned_title_patterns.json"
 RE_SEPARATORS = re.compile(r"[_\-/]+")
 RE_NON_ALNUM = re.compile(r"[^A-Za-z0-9\s]")
 RE_MULTI_SPACE = re.compile(r"\s+")

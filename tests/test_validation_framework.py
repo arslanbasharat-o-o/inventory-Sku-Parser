@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from sku_validation_framework import run_validation_suite
+from backend.sku_validation_framework import run_validation_suite
 
 
 def test_validation_framework_generates_structured_report(tmp_path: Path) -> None:

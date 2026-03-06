@@ -3,7 +3,7 @@ from __future__ import annotations
 import io
 from contextlib import contextmanager
 
-import app as app_module
+import backend.app as app_module
 
 
 def test_healthz_and_readyz() -> None:
@@ -38,3 +38,16 @@ def test_parse_inventory_returns_429_when_busy(monkeypatch) -> None:
     assert response.status_code == 429
     payload = response.get_json()
     assert "busy" in payload["error"].lower()
+
+
+def test_analyze_title_api_returns_live_analysis_payload() -> None:
+    client = app_module.app.test_client()
+    response = client.post(
+        "/analyze-title",
+        json={"title": "Pixel 8 ear speaker"},
+    )
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["parse_status"] in {"parsed", "not_understandable"}
+    assert payload["sku"] == "PIXEL 8 ES"
+    assert payload["part"] == "ES"

@@ -1,0 +1,696 @@
+{
+  "dataset": "global_mobile_repair_part_ontology",
+  "generated_at": "2026-03-06T00:21:33Z",
+  "part_code_map": {
+    "BATTERY": "BATT",
+    "CHARGING PORT": "CP",
+    "CHARGING FLEX": "CF",
+    "FINGERPRINT SENSOR": "FS",
+    "SIM TRAY": "ST",
+    "SIM READER": "SR",
+    "BACK CAMERA": "BC",
+    "BACK CAMERA MAIN": "BC-M",
+    "BACK CAMERA WIDE": "BC-W",
+    "BACK CAMERA ULTRA WIDE": "BC-UW",
+    "BACK CAMERA MACRO": "BC-MAC",
+    "BACK CAMERA TELEPHOTO": "BC-T",
+    "BACK CAMERA DEPTH": "BC-D",
+    "FRONT CAMERA": "FC",
+    "BACK CAMERA LENS": "BCL",
+    "BACK DOOR": "BDR",
+    "EAR SPEAKER": "ES",
+    "LOUD SPEAKER": "LS",
+    "VIBRATOR": "VIB",
+    "PROXIMITY SENSOR": "PS",
+    "MICROPHONE": "MIC",
+    "HEADPHONE JACK": "HJ",
+    "POWER BUTTON FLEX": "PB-F",
+    "VOLUME FLEX": "VOL-F",
+    "POWER VOLUME FLEX": "PV-F",
+    "CAMERA FLEX": "CAM-F",
+    "LCD FLEX": "LCD-F",
+    "MAINBOARD FLEX": "MB-FC",
+    "CHARGING PORT WITH HEADPHONE JACK": "CP HJ",
+    "NFC FLEX": "NFC",
+    "WIFI ANTENNA": "WIF-ANNT",
+    "ANTENNA CONNECTOR": "ANNT-CONN"
+  },
+  "part_aliases": {
+    "BATTERY": [
+      "battery",
+      "batt",
+      "bat",
+      "battery pack",
+      "cell battery",
+      "li-ion battery"
+    ],
+    "CHARGING PORT": [
+      "charging port",
+      "charging socket",
+      "charge connector",
+      "charger connector",
+      "usb port",
+      "type c port",
+      "lightning port",
+      "dock connector"
+    ],
+    "FINGERPRINT SENSOR": [
+      "fingerprint sensor",
+      "fingerprint",
+      "fingerprint scanner",
+      "fp sensor",
+      "touch id"
+    ],
+    "SIM TRAY": [
+      "sim tray",
+      "sim card tray",
+      "sim slot",
+      "sim holder"
+    ],
+    "SIM READER": [
+      "sim reader",
+      "sim card reader",
+      "sim socket",
+      "sim connector",
+      "sim flex"
+    ],
+    "BACK CAMERA": [
+      "back camera",
+      "rear camera",
+      "back cam",
+      "rear cam"
+    ],
+    "FRONT CAMERA": [
+      "front camera",
+      "selfie camera",
+      "front cam",
+      "selfie cam"
+    ],
+    "BACK CAMERA LENS": [
+      "back camera lens",
+      "rear camera lens",
+      "camera lens",
+      "camera glass",
+      "cam lens"
+    ],
+    "EAR SPEAKER": [
+      "ear speaker",
+      "earpiece",
+      "ear piece",
+      "receiver speaker",
+      "top speaker"
+    ],
+    "LOUD SPEAKER": [
+      "loud speaker",
+      "loudspeaker",
+      "bottom speaker",
+      "ringer speaker",
+      "buzzer"
+    ],
+    "VIBRATOR": [
+      "vibrator",
+      "vibration motor",
+      "haptic motor",
+      "taptic engine"
+    ],
+    "PROXIMITY SENSOR": [
+      "proximity sensor",
+      "prox sensor",
+      "ambient sensor",
+      "light sensor"
+    ],
+    "MICROPHONE": [
+      "microphone",
+      "mic",
+      "mic module",
+      "noise mic"
+    ],
+    "POWER BUTTON FLEX": [
+      "power button flex",
+      "power key flex",
+      "power flex"
+    ],
+    "VOLUME FLEX": [
+      "volume flex",
+      "volume button flex",
+      "vol key flex"
+    ],
+    "POWER VOLUME FLEX": [
+      "power volume flex",
+      "power and volume flex",
+      "volume and power flex",
+      "side key flex"
+    ],
+    "CAMERA FLEX": [
+      "camera flex",
+      "camera ribbon",
+      "cam flex"
+    ],
+    "LCD FLEX": [
+      "lcd flex",
+      "display flex",
+      "screen flex",
+      "fpc flex"
+    ],
+    "MAINBOARD FLEX": [
+      "mainboard flex",
+      "motherboard flex",
+      "board flex cable"
+    ]
+  },
+  "existing_ontology": {
+    "parts": {
+      "BATT": {
+        "label": "Battery",
+        "priority": 10,
+        "detection_phrases": [
+          "battery",
+          "batt",
+          "bat",
+          "battery pack",
+          "cell battery",
+          "phone battery",
+          "rechargeable battery",
+          "lithium battery",
+          "li-ion battery",
+          "li ion battery",
+          "li-po battery",
+          "lipo battery",
+          "internal battery",
+          "replacement battery",
+          "accumulator",
+          "power cell",
+          "power bank cell"
+        ],
+        "sku_rules": {
+          "no_attributes": true,
+          "color_allowed": false,
+          "note": "Battery SKUs never include color or secondary attributes"
+        }
+      },
+      "BC": {
+        "label": "Back Camera",
+        "priority": 79,
+        "detection_phrases": [
+          "back camera",
+          "rear camera",
+          "back cam",
+          "rear cam",
+          "main camera",
+          "rear camera module",
+          "back camera module",
+          "rear cam module",
+          "back cam module",
+          "primary camera",
+          "main rear camera",
+          "main back camera"
+        ],
+        "sku_rules": {
+          "fallback_to_main_camera": true,
+          "note": "Use BC when camera subtype is not explicitly detected"
+        }
+      },
+      "BC-D": {
+        "label": "Back Camera Depth",
+        "priority": 81,
+        "detection_phrases": [
+          "depth camera",
+          "depth cam",
+          "depth sensor camera",
+          "tof camera",
+          "time of flight camera",
+          "bokeh camera",
+          "depth of field camera"
+        ]
+      },
+      "BC-M": {
+        "label": "Back Camera Main",
+        "priority": 80,
+        "detection_phrases": [
+          "back camera",
+          "rear camera",
+          "back camera main",
+          "rear camera main",
+          "back main camera",
+          "primary back camera",
+          "back cam",
+          "rear cam",
+          "back camera module",
+          "rear camera module",
+          "back camera assembly",
+          "rear camera assembly",
+          "back camera unit",
+          "rear camera unit",
+          "back cam flex",
+          "rear cam flex"
+        ]
+      },
+      "BC-MAC": {
+        "label": "Back Camera Macro",
+        "priority": 84,
+        "detection_phrases": [
+          "macro camera",
+          "macro cam",
+          "back macro camera",
+          "rear macro camera",
+          "back camera macro",
+          "macro lens camera",
+          "close up camera"
+        ]
+      },
+      "BC-T": {
+        "label": "Back Camera Telephoto",
+        "priority": 82,
+        "detection_phrases": [
+          "telephoto camera",
+          "telephoto cam",
+          "back telephoto camera",
+          "periscope camera",
+          "zoom camera",
+          "tele camera",
+          "optical zoom camera"
+        ]
+      },
+      "BC-UW": {
+        "label": "Back Camera Ultra Wide",
+        "priority": 83,
+        "detection_phrases": [
+          "ultra wide camera",
+          "ultrawide camera",
+          "back camera ultra wide",
+          "rear camera ultra wide",
+          "ultra wide back camera",
+          "ultra wide rear camera",
+          "back ultrawide camera",
+          "ultra wide cam"
+        ]
+      },
+      "BC-W": {
+        "label": "Back Camera Wide",
+        "priority": 85,
+        "detection_phrases": [
+          "back camera wide",
+          "rear camera wide",
+          "wide back camera",
+          "wide angle back camera",
+          "wide cam",
+          "back cam wide",
+          "wide angle camera",
+          "wide angle cam"
+        ]
+      },
+      "BCL": {
+        "label": "Back Camera Lens",
+        "priority": 60,
+        "detection_phrases": [
+          "back camera lens",
+          "rear camera lens",
+          "camera lens",
+          "camera glass",
+          "cam lens",
+          "camera lens cover",
+          "camera lens glass",
+          "camera protector glass",
+          "camera circle glass",
+          "camera ring",
+          "camera cover glass",
+          "camera lens protector",
+          "camera module glass",
+          "rear cam lens",
+          "back cam lens",
+          "camera glass lens"
+        ]
+      },
+      "BDR": {
+        "label": "Back Door",
+        "priority": 190,
+        "detection_phrases": [
+          "back door",
+          "back cover",
+          "back glass",
+          "rear door",
+          "rear cover",
+          "rear glass",
+          "battery cover",
+          "battery door",
+          "back housing",
+          "rear housing",
+          "back panel",
+          "rear panel",
+          "back plate",
+          "back casing",
+          "back shell",
+          "back lid",
+          "rear lid",
+          "glass back"
+        ],
+        "sku_rules": {
+          "color_allowed": true,
+          "color_suffix": true,
+          "camera_lens_suffix_allowed": true
+        }
+      },
+      "CAM-F": {
+        "label": "Camera Flex",
+        "priority": 170,
+        "detection_phrases": [
+          "camera flex",
+          "cam flex",
+          "camera flex cable",
+          "cam flex cable",
+          "camera ribbon cable",
+          "camera cable",
+          "cam cable",
+          "camera connector cable"
+        ]
+      },
+      "CP": {
+        "label": "Charging Port",
+        "priority": 20,
+        "detection_phrases": [
+          "charging port",
+          "charger port",
+          "charge port",
+          "charging socket",
+          "charging connector",
+          "charger connector",
+          "charge connector",
+          "charging flex",
+          "charger flex",
+          "charge flex",
+          "charging board",
+          "charging pcb",
+          "usb port",
+          "usb c port",
+          "usb-c port",
+          "type c port",
+          "type-c port",
+          "lightning port",
+          "lightning connector",
+          "dock connector",
+          "dock port",
+          "data port",
+          "data connector",
+          "power port",
+          "power connector",
+          "micro usb port",
+          "micro-usb port",
+          "charge plug",
+          "charging plug",
+          "charge jack",
+          "charging jack",
+          "charging pin"
+        ]
+      },
+      "ES": {
+        "label": "Ear Speaker",
+        "priority": 90,
+        "detection_phrases": [
+          "ear speaker",
+          "earpiece speaker",
+          "earpiece",
+          "ear piece",
+          "receiver speaker",
+          "receiver",
+          "top speaker",
+          "ear receiver",
+          "call speaker",
+          "call receiver",
+          "handset speaker",
+          "handset receiver",
+          "front speaker",
+          "upper speaker",
+          "listen speaker",
+          "in-call speaker"
+        ]
+      },
+      "FC": {
+        "label": "Front Camera",
+        "priority": 70,
+        "detection_phrases": [
+          "front camera",
+          "selfie camera",
+          "front cam",
+          "selfie cam",
+          "front facing camera",
+          "front camera module",
+          "selfie camera module",
+          "front camera assembly",
+          "selfie camera assembly",
+          "forward camera",
+          "inner camera",
+          "face camera",
+          "hole punch camera",
+          "punch hole camera",
+          "under display camera",
+          "pop up camera",
+          "ffc"
+        ]
+      },
+      "FS": {
+        "label": "Fingerprint Sensor",
+        "priority": 30,
+        "detection_phrases": [
+          "fingerprint sensor",
+          "fingerprint scanner",
+          "fingerprint reader",
+          "fingerprint",
+          "finger print sensor",
+          "finger print",
+          "touch id",
+          "fp sensor",
+          "fp scanner",
+          "biometric sensor",
+          "fingerprint flex",
+          "fingerprint module",
+          "fingerprint button",
+          "fingerprint home button",
+          "under display fingerprint",
+          "in-display fingerprint",
+          "optical fingerprint sensor",
+          "fingerprint sensor flex"
+        ],
+        "sku_rules": {
+          "color_allowed": true,
+          "color_suffix": true
+        }
+      },
+      "HJ": {
+        "label": "Headphone Jack",
+        "priority": 175,
+        "detection_phrases": [
+          "headphone jack",
+          "headphone port",
+          "audio jack",
+          "earphone jack",
+          "3.5mm jack",
+          "3.5 mm jack",
+          "aux jack",
+          "aux port",
+          "audio port",
+          "headset jack",
+          "headset port",
+          "jack port",
+          "phone jack"
+        ]
+      },
+      "LS": {
+        "label": "Loud Speaker",
+        "priority": 100,
+        "detection_phrases": [
+          "loud speaker",
+          "loudspeaker",
+          "bottom speaker",
+          "external speaker",
+          "ringer",
+          "buzzer",
+          "speaker ringer",
+          "ringer speaker",
+          "buzzer speaker",
+          "ringtone speaker",
+          "music speaker",
+          "main speaker",
+          "speakerphone",
+          "speaker phone",
+          "back speaker",
+          "rear speaker",
+          "alarm speaker"
+        ]
+      },
+      "MIC": {
+        "label": "Microphone",
+        "priority": 130,
+        "detection_phrases": [
+          "microphone",
+          "mic",
+          "microphone flex",
+          "mic module",
+          "mic flex",
+          "bottom mic",
+          "top mic",
+          "noise mic",
+          "noise cancellation mic",
+          "secondary mic",
+          "main mic",
+          "audio mic",
+          "microphone module",
+          "microphone unit"
+        ]
+      },
+      "PB-F": {
+        "label": "Power Button Flex",
+        "priority": 140,
+        "detection_phrases": [
+          "power button flex",
+          "power key flex",
+          "power button",
+          "power key",
+          "power btn",
+          "power flex",
+          "power flex cable",
+          "on off button",
+          "on/off button",
+          "sleep button",
+          "lock button",
+          "power switch",
+          "power button cable"
+        ]
+      },
+      "PS": {
+        "label": "Proximity Sensor",
+        "priority": 120,
+        "detection_phrases": [
+          "proximity sensor",
+          "prox sensor",
+          "face sensor",
+          "ambient sensor",
+          "ambient light sensor",
+          "light sensor",
+          "proximity sensor flex",
+          "ps module",
+          "proximity module",
+          "ambient proximity sensor"
+        ]
+      },
+      "PV-F": {
+        "label": "Power Volume Flex",
+        "priority": 160,
+        "detection_phrases": [
+          "power volume flex",
+          "power volume key",
+          "power and volume",
+          "volume and power",
+          "side key",
+          "side button",
+          "side buttons",
+          "side key flex",
+          "side flex",
+          "power volume button",
+          "power volume cable"
+        ]
+      },
+      "SCR": {
+        "label": "Screen",
+        "priority": 180,
+        "detection_phrases": [
+          "screen",
+          "lcd",
+          "display",
+          "lcd display",
+          "lcd screen",
+          "oled display",
+          "amoled display",
+          "super amoled display",
+          "ips display",
+          "touch screen",
+          "touchscreen",
+          "digitizer",
+          "touch panel",
+          "screen display",
+          "glass display",
+          "glass screen"
+        ]
+      },
+      "SR": {
+        "label": "SIM Reader",
+        "priority": 50,
+        "detection_phrases": [
+          "sim reader",
+          "sim card reader",
+          "sim socket",
+          "sim flex",
+          "sim connector",
+          "sim board",
+          "sim module",
+          "sim reader flex",
+          "sim card connector",
+          "sim card socket"
+        ]
+      },
+      "ST": {
+        "label": "SIM Tray",
+        "priority": 40,
+        "detection_phrases": [
+          "sim tray",
+          "sim card tray",
+          "sim card holder",
+          "sim holder",
+          "sim slot",
+          "sim card slot",
+          "sim drawer",
+          "sim pin tray",
+          "micro sim slot",
+          "nano sim tray",
+          "dual sim tray",
+          "sim tray holder",
+          "sim ejector tray",
+          "esim tray",
+          "dual sim holder"
+        ],
+        "sku_rules": {
+          "color_allowed": true,
+          "color_suffix": true
+        }
+      },
+      "VIB": {
+        "label": "Vibrator",
+        "priority": 110,
+        "detection_phrases": [
+          "vibrator",
+          "vibration motor",
+          "vibrate motor",
+          "vibrating motor",
+          "haptic motor",
+          "haptic engine",
+          "taptic engine",
+          "linear vibrator",
+          "linear motor",
+          "vibe motor",
+          "vibration module",
+          "vibro motor"
+        ]
+      },
+      "VOL-F": {
+        "label": "Volume Flex",
+        "priority": 150,
+        "detection_phrases": [
+          "volume flex",
+          "volume key flex",
+          "volume button",
+          "volume key",
+          "volume btn",
+          "vol key",
+          "vol button",
+          "volume switch",
+          "volume cable",
+          "volume flex cable",
+          "volume up down button",
+          "volume up button",
+          "volume down button"
+        ]
+      }
+    },
+    "priority_resolution": "lower_number_wins",
+    "default_sku_note": "When part has ambiguous detection, use highest priority matching code"
+  }
+}

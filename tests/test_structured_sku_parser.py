@@ -5,7 +5,7 @@ from pathlib import Path
 import pandas as pd
 import pytest
 
-from structured_sku_parser import (
+from backend.structured_sku_parser import (
     ParsedSKUResult,
     StructuredParseError,
     StructuredSKUParserService,

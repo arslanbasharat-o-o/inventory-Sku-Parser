@@ -8,17 +8,19 @@ from pathlib import Path
 
 import pandas as pd
 
-from sku_intelligence_engine import (
+from .sku_intelligence_engine import (
     DEFAULT_MOBILE_PARTS_DICTIONARY,
     DEFAULT_MOBILE_PARTS_ONTOLOGY,
     DEFAULT_PART_CODE_RULES,
     EngineConfig,
     LEARNED_PARTS_FILE,
     LEARNED_PATTERNS_FILE,
+    LEARNED_SKU_CORRECTIONS_FILE,
     LEARNED_TITLE_PATTERNS_FILE,
     MAX_SKU_LENGTH,
     NOT_UNDERSTANDABLE,
     PARTS_DICTIONARY_FILE,
+    PART_ONTOLOGY_DATASET_FILE,
     PARTS_ONTOLOGY_FILE,
     PART_CODE_RULES_FILE,
     SEMANTIC_TOKEN_HINTS,
@@ -57,6 +59,7 @@ def _sync_engine_paths_from_globals() -> None:
     _ENGINE.config.legacy_learned_title_patterns_file = Path(LEARNED_TITLE_PATTERNS_FILE)
     _ENGINE.config.learned_patterns_file = Path(LEARNED_PATTERNS_FILE)
     _ENGINE.config.training_patterns_file = Path(TRAINING_PATTERNS_FILE)
+    _ENGINE.config.learned_sku_corrections_file = Path(LEARNED_SKU_CORRECTIONS_FILE)
 
 
 def _refresh_parts_lookup() -> None:
@@ -78,10 +81,30 @@ def _refresh_parts_lookup() -> None:
     _ENGINE._parse_cached.cache_clear()
 
 
+def reload_runtime_resources() -> None:
+    """Reload parser datasets and rebuild in-memory indexes."""
+    _sync_engine_paths_from_globals()
+    _ENGINE.config.learned_sku_corrections_file = Path(LEARNED_SKU_CORRECTIONS_FILE)
+    _ENGINE.reload_runtime_resources()
+
+
+def get_engine() -> SKUIntelligenceEngine:
+    """Return the singleton parser engine used by this module."""
+    return _ENGINE
+
+
 def semantic_part_detection(text: str) -> str:
     """Backward-compatible semantic part detector."""
     _sync_engine_paths_from_globals()
     return _ENGINE.semantic_part_detection(text)
+
+
+def load_sku_ontology(
+    ontology_file: str | Path = PART_ONTOLOGY_DATASET_FILE,
+) -> dict[str, str]:
+    """Load SKU part ontology JSON and apply it as the parser source of truth."""
+    _sync_engine_paths_from_globals()
+    return _ENGINE.load_sku_ontology(Path(ontology_file))
 
 
 def detect_part(
@@ -91,12 +114,12 @@ def detect_part(
     product_description_hint: object = "",
 ) -> str:
     _sync_engine_paths_from_globals()
-    return _ENGINE.parse_title(
+    return _ENGINE.detect_part(
         title,
         product_sku_hint,
         product_web_sku_hint,
         product_description_hint,
-    ).part_code
+    )
 
 
 def interpret_title_semantically(
@@ -214,6 +237,7 @@ __all__ = [
     "LEARNED_TITLE_PATTERNS_FILE",
     "LEARNED_PARTS_FILE",
     "LEARNED_PATTERNS_FILE",
+    "LEARNED_SKU_CORRECTIONS_FILE",
     "TRAINING_PATTERNS_FILE",
     "UNKNOWN_LOG_FILE",
     "SEMANTIC_SUGGESTION_FILE",
@@ -221,8 +245,11 @@ __all__ = [
     "MOBILE_PARTS_DICTIONARY",
     "_UNKNOWN_PATTERN_COUNTER",
     "_refresh_parts_lookup",
+    "reload_runtime_resources",
+    "get_engine",
     "SEMANTIC_TOKEN_HINTS",
     "semantic_part_detection",
+    "load_sku_ontology",
     "detect_part",
     "interpret_title_semantically",
     "generate_sku",

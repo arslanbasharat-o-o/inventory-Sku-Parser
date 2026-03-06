@@ -17,11 +17,12 @@ RUN pip install --upgrade pip \
     && grep -vE '^(sentence-transformers|faiss-cpu)' requirements.txt > /tmp/requirements-runtime.txt \
     && pip install -r /tmp/requirements-runtime.txt
 
-COPY app.py fastapi_app.py structured_sku_parser.py ai_parser.py sku_parser.py sku_intelligence_engine.py gunicorn.conf.py ./
-COPY part_code_rules.json mobile_parts_dictionary.json mobile_parts_ontology.json learned_parts.json learned_patterns.json learned_spelling_variations.json spelling_corrections.json training_patterns.json unknown_parts_log.json ./
+COPY gunicorn.conf.py ./
+COPY backend ./backend
+COPY data ./data
 
 RUN mkdir -p /data/uploads /data/outputs
 
 EXPOSE 5000
 
-CMD ["gunicorn", "-c", "gunicorn.conf.py", "app:app"]
+CMD ["gunicorn", "-c", "gunicorn.conf.py", "backend.app:app"]

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pandas as pd
 
-from train_title_patterns import train_patterns_from_dataframe
+from backend.train_title_patterns import train_patterns_from_dataframe
 
 
 def test_train_patterns_learns_expected_part_phrases() -> None:
