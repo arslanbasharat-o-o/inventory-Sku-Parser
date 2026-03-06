@@ -2,8 +2,14 @@ import type { NextConfig } from "next";
 
 const backendBaseUrl =
   process.env.SKU_BACKEND_URL?.trim().replace(/\/+$/, "") || "http://127.0.0.1:5000";
+const isCi = process.env.CI === "true";
 
 const nextConfig: NextConfig = {
+  experimental: isCi
+    ? {
+        cpus: 1,
+      }
+    : undefined,
   async rewrites() {
     return [
       {
