@@ -5,6 +5,13 @@ Production-grade SKU intelligence engine for mobile phone repair parts inventory
 [![Python Backend CI](https://github.com/arslanbasharat-o-o/inventory-Sku-Parser/actions/workflows/python-backend-ci.yml/badge.svg)](https://github.com/arslanbasharat-o-o/inventory-Sku-Parser/actions/workflows/python-backend-ci.yml)
 [![Next.js Frontend CI](https://github.com/arslanbasharat-o-o/inventory-Sku-Parser/actions/workflows/nextjs-frontend-ci.yml/badge.svg)](https://github.com/arslanbasharat-o-o/inventory-Sku-Parser/actions/workflows/nextjs-frontend-ci.yml)
 
+## GitHub About
+Description:
+`SKU intelligence engine for mobile phone repair parts. Parses messy titles into standardized SKUs with live analysis, batch processing, and training tools.`
+
+Suggested topics:
+`sku-parser`, `inventory-management`, `mobile-repair`, `repair-parts`, `python`, `fastapi`, `nextjs`, `ontology`, `excel-processing`, `data-normalization`
+
 ## Version
 - Current release: `v3.0.0`
 - Changelog: [`CHANGELOG.md`](./CHANGELOG.md)
