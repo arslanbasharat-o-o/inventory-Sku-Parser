@@ -59,19 +59,52 @@ jobs:
           NODE_OPTIONS: "--max-old-space-size=4096"
           NEXT_DISABLE_SWC_WORKER: "1"
         run: |
-          set -euo pipefail
-          echo "Webpack build attempt 1/2"
-          if npm run build -- --webpack; then
+          set +e
+
+          npm run build -- --webpack > /tmp/frontend-build-webpack.log 2>&1
+          webpack_status=$?
+          if [ "$webpack_status" -eq 0 ]; then
+            cat /tmp/frontend-build-webpack.log
             exit 0
           fi
-          echo "Webpack build attempt 1 failed; retrying once..."
-          sleep 5
-          echo "Webpack build attempt 2/2"
-          if npm run build -- --webpack; then
+
+          npm run build > /tmp/frontend-build-turbo.log 2>&1
+          turbo_status=$?
+          if [ "$turbo_status" -eq 0 ]; then
+            cat /tmp/frontend-build-turbo.log
             exit 0
           fi
-          echo "Webpack failed twice; trying Turbopack fallback once..."
-          npm run build
+
+          echo "::error file=frontend-build::webpack exit code=${webpack_status}, turbopack exit code=${turbo_status}"
+
+          echo "::group::Webpack build log"
+          cat /tmp/frontend-build-webpack.log || true
+          echo "::endgroup::"
+
+          echo "::group::Turbopack build log"
+          cat /tmp/frontend-build-turbo.log || true
+          echo "::endgroup::"
+
+          tr '\r' '\n' < /tmp/frontend-build-webpack.log > /tmp/frontend-build-webpack.norm.log
+          tr '\r' '\n' < /tmp/frontend-build-turbo.log > /tmp/frontend-build-turbo.norm.log
+          tail -n 300 /tmp/frontend-build-webpack.norm.log > /tmp/frontend-build-webpack.tail.log
+          tail -n 300 /tmp/frontend-build-turbo.norm.log > /tmp/frontend-build-turbo.tail.log
+
+          while IFS= read -r line; do
+            esc="${line//'%'/'%25'}"
+            esc="${esc//$'\r'/'%0D'}"
+            esc="${esc//$'\n'/'%0A'}"
+            echo "::error file=frontend-build-webpack::${esc}"
+          done < /tmp/frontend-build-webpack.tail.log
+
+          while IFS= read -r line; do
+            esc="${line//'%'/'%25'}"
+            esc="${esc//$'\r'/'%0D'}"
+            esc="${esc//$'\n'/'%0A'}"
+            echo "::error file=frontend-build-turbo::${esc}"
+          done < /tmp/frontend-build-turbo.tail.log
+
+          exit 1
 
       - name: Package build artifact
         run: |
