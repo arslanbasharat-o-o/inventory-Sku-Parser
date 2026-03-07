@@ -276,6 +276,8 @@ def infer_part_code(
     padded = f" {normalized_title} "
     for phrase, code in seed_items:
         if f" {phrase} " in padded:
+            if phrase in {"charging port board", "charge port board"}:
+                return "CP"
             return code
 
     hint_inferred = infer_code_from_hints(
@@ -390,6 +392,19 @@ def matched_seed_phrases(normalized_title: str, seed_items: tuple[tuple[str, str
     return out
 
 
+def _normalize_learned_phrase_and_code(phrase: str, code: str) -> tuple[str, str]:
+    normalized_phrase = normalize_phrase(phrase)
+    normalized_code = normalize_code(code)
+    if normalized_phrase in {
+        "charging connector",
+        "charge connector",
+        "charge port",
+        "charging port board",
+    }:
+        return "charging port", "CP"
+    return normalized_phrase, normalized_code
+
+
 def _is_safe_singleton(phrase: str, code: str) -> bool:
     safe = {
         "battery": "BATT",
@@ -459,7 +474,9 @@ def train_patterns_from_dataframe(
             candidates = candidate_phrases_from_tokens(tokens, brands, model_tokens, code=code)
 
         for phrase in candidates:
-            phrase_code_counts[phrase][code] += 1
+            learned_phrase, learned_code = _normalize_learned_phrase_and_code(phrase, code)
+            if learned_phrase and learned_code:
+                phrase_code_counts[learned_phrase][learned_code] += 1
 
     learned_patterns: dict[str, str] = {}
     for phrase, code_counts in phrase_code_counts.items():

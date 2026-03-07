@@ -49,6 +49,23 @@ RE_MULTI_SPACE = re.compile(r"\s+")
 RE_SEPARATORS = re.compile(r"[-_/]+")
 RE_NON_TITLE_TEXT = re.compile(r"[^A-Za-z0-9\s+]")
 UNRESOLVED_PART = "UNRESOLVED"
+FLEX_RULE_CODES = {
+    "CF",
+    "CAM-F",
+    "PB-F",
+    "VOL-F",
+    "PV-F",
+    "MIC-FC",
+    "L-FLEX",
+    "LCD-F",
+    "MFC",
+    "MB-FC",
+    "VB-F",
+    "HB-FC",
+    "NFC-CF",
+    "P/V-F",
+    "FPC",
+}
 
 
 def _load_project_env_file() -> None:
@@ -89,7 +106,7 @@ class StructuredParseExecution:
     parsed: ParsedSKUResult
     source: Literal["rule", "ai", "cache"]
     parser_reason: str
-    parse_status: Literal["parsed", "not_understandable"]
+    parse_status: Literal["parsed", "partial", "not_understandable"]
     review_required: bool
     correction_pairs: list[dict[str, str]]
 
@@ -376,13 +393,29 @@ class StructuredSKUParserService:
     def _confidence_for_rule(parser_reason: str, corrections: list[str]) -> float:
         reason = parser_reason.lower()
         fuzzy_markers = ("fuzzy", "dictionary", "phonetic", "vector", "semantic")
-        if corrections or any(marker in reason for marker in fuzzy_markers):
+        if any(marker in reason for marker in fuzzy_markers):
             return 0.90
         return 0.98
 
     @staticmethod
     def _confidence_for_ai() -> float:
         return 0.80
+
+    @staticmethod
+    def derive_parse_status(parsed: ParsedSKUResult) -> Literal["parsed", "partial", "not_understandable"]:
+        normalized_sku = str(parsed.sku or "").strip().upper()
+        if normalized_sku and normalized_sku != NOT_UNDERSTANDABLE:
+            return "parsed"
+        for value in (
+            parsed.brand,
+            parsed.model,
+            parsed.model_code,
+            parsed.primary_part,
+            parsed.secondary_part or "",
+        ):
+            if str(value or "").strip():
+                return "partial"
+        return "not_understandable"
 
     def _run_rule_parser(
         self,
@@ -416,12 +449,30 @@ class StructuredSKUParserService:
     def _ai_prompt(self, *, title: str, rule_result: ParsedSKUResult) -> str:
         allowed_codes = sorted(self._rule_allowed_codes, key=len, reverse=True)
         return (
-            "You are a rule-driven TX Parts SKU parser.\n"
-            "ABSOLUTE RULE: Never invent abbreviations. Use only codes from the official rule list.\n"
-            "If no rule code is available, set primary_part='UNRESOLVED' and sku='"
-            f"{NOT_UNDERSTANDABLE}'.\n"
-            "SKU hard limit: 31 characters including spaces.\n"
-            "Use uppercase for brand/model/model_code/primary_part/secondary_part/sku.\n"
+            "You are a rule-driven TX Parts AI parser and SKU generator.\n"
+            "Use three stages internally: title understanding, parser normalization, SKU rule enforcement.\n"
+            "The same title must always generate the same SKU across single-title parsing and bulk parsing.\n"
+            "ABSOLUTE RULES:\n"
+            "- never invent abbreviations\n"
+            "- use only official rule codes from the allowed list\n"
+            "- if no rule code is available, set primary_part='UNRESOLVED' and sku='"
+            f"{NOT_UNDERSTANDABLE}'\n"
+            "- SKU length must be <= 31 characters including spaces\n"
+            "- output uppercase values for brand/model/model_code/primary_part/secondary_part/sku\n"
+            "NORMALIZATION RULES:\n"
+            "- collapse part synonyms into one canonical rule code\n"
+            "- never repeat duplicate attributes already covered by the rule code\n"
+            "- if a flex rule code is used, do not append extra FPC/FLEX/MB-FC style codes\n"
+            "Examples:\n"
+            "- HOME BUTTON FLEX -> HB-FC\n"
+            "- HOME BUTTON FLEX CABLE -> HB-FC\n"
+            "- HOME BUTTON FPC -> HB-FC\n"
+            "- HOME BUTTON RIBBON CABLE -> HB-FC\n"
+            "- invalid 'GALAXY NOTE 20 HB FPC MB-FC' must normalize to 'GALAXY NOTE 20 HB-FC'\n"
+            "MODEL NORMALIZATION EXAMPLES:\n"
+            "- SAMSUNG GALAXY NOTE 20 -> model='GALAXY NOTE 20'\n"
+            "- SAMSUNG NOTE 20 -> model='GALAXY NOTE 20'\n"
+            "- GALAXY NOTE20 -> model='GALAXY NOTE 20'\n"
             "Official allowed rule codes:\n"
             f"{', '.join(allowed_codes)}\n"
             "Return ONLY valid JSON matching this exact shape:\n"
@@ -432,11 +483,49 @@ class StructuredSKUParserService:
             "- secondary_part must be null or one allowed rule code\n"
             "- corrections entries must look like WRONG->RIGHT\n"
             "- confidence must be 0..1\n"
+            "- generated SKU must follow the normalized rule code, not raw token matching\n"
             f"- unknown/ambiguous titles must return sku='{NOT_UNDERSTANDABLE}'\n"
             "- no markdown, no comments, no extra keys\n"
             f"Product title: {title}\n"
             f"Rule parser candidate JSON: {rule_result.model_dump_json()}"
         )
+
+    @staticmethod
+    def _is_flex_rule_code(code: str) -> bool:
+        normalized = StructuredSKUParserService._normalize_rule_code(code)
+        if not normalized:
+            return False
+        if normalized in FLEX_RULE_CODES:
+            return True
+        return normalized.endswith("-F") or normalized.endswith("-FC")
+
+    def _compose_ai_sku(self, parsed: ParsedSKUResult) -> str:
+        model = str(parsed.model or "").upper().strip()
+        primary = self._normalize_rule_code(parsed.primary_part)
+        secondary = self._normalize_rule_code(parsed.secondary_part or "")
+        model_code = str(parsed.model_code or "").upper().strip()
+
+        if not model or not primary or primary == UNRESOLVED_PART:
+            return NOT_UNDERSTANDABLE
+
+        tokens: list[str] = [model]
+
+        # Removed: internal model_code is no longer included in the generated SKU
+
+        tokens.extend(primary.split())
+        if secondary:
+            tokens.extend(secondary.split())
+
+        sku = RE_MULTI_SPACE.sub(" ", " ".join(tokens)).strip()
+        if len(sku) <= 31:
+            return sku
+
+        if model_code:
+            compact = RE_MULTI_SPACE.sub(" ", " ".join([model] + primary.split() + (secondary.split() if secondary else []))).strip()
+            if len(compact) <= 31:
+                return compact
+
+        return NOT_UNDERSTANDABLE
 
     def _validate_ai_result(self, parsed: ParsedSKUResult) -> ParsedSKUResult | None:
         raw_sku = str(parsed.sku or "").upper().strip()
@@ -468,10 +557,23 @@ class StructuredSKUParserService:
             )
             return None
 
-        if normalized.sku != NOT_UNDERSTANDABLE and not normalized.primary_part:
-            LOGGER.warning("Rejecting AI result due to missing primary_part with non-empty SKU")
+        normalized.primary_part = primary_norm
+        if normalized.secondary_part:
+            normalized.secondary_part = self._normalize_rule_code(normalized.secondary_part)
+            if normalized.secondary_part == primary_norm:
+                normalized.secondary_part = None
+            elif self._is_flex_rule_code(primary_norm) and self._is_flex_rule_code(normalized.secondary_part):
+                normalized.secondary_part = None
+
+        rebuilt_sku = self._compose_ai_sku(normalized)
+        if rebuilt_sku == NOT_UNDERSTANDABLE:
+            LOGGER.warning(
+                "Rejecting AI result because structured fields could not produce a valid SKU: %s",
+                normalized.model_dump_json(),
+            )
             return None
 
+        normalized.sku = rebuilt_sku
         normalized.confidence = self._confidence_for_ai()
         return normalized
 
@@ -655,9 +757,7 @@ class StructuredSKUParserService:
         )
         cached = self._cache_get(cache_key)
         if cached is not None:
-            parse_status: Literal["parsed", "not_understandable"] = (
-                "parsed" if cached.sku != NOT_UNDERSTANDABLE else "not_understandable"
-            )
+            parse_status = self.derive_parse_status(cached)
             return StructuredParseExecution(
                 parsed=cached,
                 source="cache",
@@ -686,9 +786,7 @@ class StructuredSKUParserService:
             parser_reason = "ai_structured_inference"
             correction_pairs = []
 
-        parse_status: Literal["parsed", "not_understandable"] = (
-            "parsed" if final_result.sku != NOT_UNDERSTANDABLE else "not_understandable"
-        )
+        parse_status = self.derive_parse_status(final_result)
 
         self._cache_set(cache_key, final_result)
         self._log_result(

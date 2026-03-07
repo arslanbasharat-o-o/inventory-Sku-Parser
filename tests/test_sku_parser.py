@@ -104,6 +104,16 @@ def test_model_detection_prefers_longest_specific_match() -> None:
     assert analyze_title("redmi note 12 pro display")["model"] == "REDMI NOTE 12 PRO"
 
 
+def test_model_only_titles_return_partial_without_injecting_catalog_part() -> None:
+    payload = analyze_title("Pixel 8 pro")
+
+    assert payload["brand"] == "GOOGLE"
+    assert payload["model"] == "PIXEL 8 PRO"
+    assert payload["part"] == ""
+    assert payload["sku"] == NOT_UNDERSTANDABLE
+    assert payload["parse_status"] == "partial"
+
+
 def test_display_assembly_filtering_kept() -> None:
     assert generate_sku("Galaxy A52 OLED Assembly") == NOT_UNDERSTANDABLE
     assert generate_sku("Galaxy A52 Screen Assembly") == NOT_UNDERSTANDABLE
@@ -200,6 +210,82 @@ def test_sim_tray_color_suffix_is_preserved() -> None:
         generate_sku("Galaxy A71 5G A716 Single SIM Tray Prism Cube Blue")
         == "GALAXY A71 5G A716 ST BLU"
     )
+
+
+def test_long_marketing_colors_are_simplified_for_color_bearing_parts() -> None:
+    assert (
+        generate_sku("Single Sim Card Tray for Galaxy A72 A725 Awesome Violet")
+        == "GALAXY A72 A725 ST VIOLET"
+    )
+    assert (
+        generate_sku("Fingerprint Sensor for Galaxy A05S A057 Awesome Violet")
+        == "GALAXY A05S A057 FS VIOLET"
+    )
+    assert (
+        generate_sku("Galaxy A71 5G A716 Back Door Awesome Violet")
+        == "GALAXY A71 5G A716 BDR VIOLET"
+    )
+
+
+def test_home_button_flex_uses_single_standardized_code_with_color() -> None:
+    assert generate_sku("Galaxy Note 5 Home Button Blue") == "GALAXY NOTE 5 HB-FC BLU"
+    assert generate_sku("Galaxy Note 5 Home Button White") == "GALAXY NOTE 5 HB-FC WHT"
+    assert generate_sku("Galaxy Note 5 Home Button Gold") == "GALAXY NOTE 5 HB-FC GLD"
+    assert generate_sku("Galaxy Note 4 Home Button Black") == "GALAXY NOTE 4 HB-FC BLK"
+    assert generate_sku("Galaxy Note 4 Home Button White") == "GALAXY NOTE 4 HB-FC WHT"
+
+
+def test_home_button_titles_do_not_bleed_into_model_detection() -> None:
+    parsed = analyze_title("Galaxy Note 5 Home Button Blue")
+    assert parsed["model"] == "GALAXY NOTE 5"
+    assert parsed["part"] == "HB-FC"
+    assert parsed["sku"] == "GALAXY NOTE 5 HB-FC BLU"
+
+
+def test_home_button_flex_synonyms_collapse_to_single_rule_code() -> None:
+    assert generate_sku("HOME BUTTON FLEX FOR SAMSUNG NOTE 20") == "GALAXY NOTE 20 HB-FC"
+    assert generate_sku("HOME BUTTON FPC FOR SAMSUNG NOTE 20") == "GALAXY NOTE 20 HB-FC"
+    assert generate_sku("HOME BUTTON RIBBON CABLE FOR SAMSUNG NOTE 20") == "GALAXY NOTE 20 HB-FC"
+    assert generate_sku("HOME BUTTON FLEX CABLE FOR SAMSUNG NOTE 20") == "GALAXY NOTE 20 HB-FC"
+    assert generate_sku("HOME BUTTON WITH FLEX FOR SAMSUNG NOTE 20") == "GALAXY NOTE 20 HB-FC"
+
+
+def test_home_button_analysis_does_not_duplicate_flex_terms() -> None:
+    parsed = analyze_title("HOME BUTTON FLEX CABLE FOR SAMSUNG NOTE 20")
+    assert parsed["interpreted_title"] == "home button flex for samsung note 20"
+    assert parsed["part"] == "HB-FC"
+    assert parsed["sku"] == "GALAXY NOTE 20 HB-FC"
+
+
+def test_backdoor_without_space_and_head_phone_jack_normalize_correctly() -> None:
+    assert generate_sku("BackDoor for Samsung Galaxy Note 4 Charcoal Black") == "GALAXY NOTE 4 BDR BCL BLK"
+    assert generate_sku("Head Phone Jack Black for Samsung Galaxy Note 9") == "GALAXY NOTE 9 HJ"
+
+
+def test_workbook_error_patterns_use_deterministic_rules() -> None:
+    assert generate_sku("Charging Port with Board for Samsung Galaxy Note 10") == "GALAXY NOTE 10 CP-B"
+    assert generate_sku("S-Pen Sensor Flex for Samsung Galaxy Note 9") == "GALAXY NOTE 9 CF"
+    assert (
+        generate_sku("Back Camera Wide & Telephoto & Ultra Wide for Samsung Galaxy Note 20 Ultra")
+        == "GALAXY NOTE 20 ULTRA BC-W-T-UW"
+    )
+
+
+def test_samsung_note_lite_compatibility_group_beats_tab_alias() -> None:
+    assert (
+        generate_sku("Vibrator for Samsung Galaxy Note 10 Lite / S10 Lite")
+        == "GALAXY NOTE 10 LITE S10 VIB"
+    )
+
+
+def test_lcd_frame_adhesive_does_not_duplicate_lcd_code_from_hint() -> None:
+    parsed = analyze_title(
+        "LCD Frame Adhesive for Samsung Galaxy Note 20 5G",
+        product_sku_hint="N20 LCD Frame Tape",
+    )
+    assert parsed["sku"] == "GALAXY NOTE 20 5G N20 LCD-F"
+    assert parsed["part"] == "LCD-F"
+    assert parsed["secondary_part"] == ""
 
 
 def test_backdoor_rule_includes_bcl_and_color() -> None:
@@ -397,6 +483,75 @@ def test_process_inventory_duplicate_resolution_uses_attributes(tmp_path: Path) 
     assert result["SKU Duplicate"].eq("DUPLICATED").sum() == 0
 
 
+def test_process_inventory_respects_hard_length_limit_for_long_backdoors(tmp_path: Path) -> None:
+    input_path = tmp_path / "input.xlsx"
+    output_path = tmp_path / "output.xlsx"
+
+    pd.DataFrame(
+        {
+            "Product Name": [
+                "Samsung Galaxy S23 Ultra S918 Back Door Green",
+                "Samsung Galaxy S23 Ultra S918 Back Door White",
+            ],
+            "Product SKU": ["", ""],
+            "Product Web SKU": ["", ""],
+        }
+    ).to_excel(input_path, index=False)
+
+    result = process_inventory(input_path, output_path)
+
+    assert result.loc[0, "Product New SKU"] == "GALAXY S23 ULTRA S918 BDR GRN"
+    assert result.loc[1, "Product New SKU"] == "GALAXY S23 ULTRA S918 BDR WHT"
+    assert result["Product New SKU"].map(len).max() <= 31
+    assert result["SKU Duplicate"].eq("DUPLICATED").sum() == 0
+
+
+def test_single_title_builder_enforces_hard_limit_on_slash_models() -> None:
+    engine = SKUIntelligenceEngine(
+        EngineConfig(
+            ontology_file=PARTS_ONTOLOGY_FILE,
+            dictionary_file=PARTS_DICTIONARY_FILE,
+            part_rules_file=PART_CODE_RULES_FILE,
+            enable_vector_layer=False,
+        )
+    )
+
+    vib_sku = engine._build_sku("PIXEL", "6/6A/6PRO/7/7PRO/8/8PRO", "", "VIB", "", "")
+    backdoor_sku = engine._build_sku(
+        "PIXEL",
+        "6/6A/6PRO/7/7PRO/8/8PRO",
+        "",
+        "BACKDOOR",
+        "",
+        "BLACK",
+    )
+
+    assert vib_sku == "PIXEL 6/6A/6PRO/7/7PRO/8 VIB"
+    assert len(vib_sku) <= 31
+    assert vib_sku.endswith(" VIB")
+
+    assert backdoor_sku == "PIXEL 6/6A/6PRO BACKDOOR BLACK"
+    assert len(backdoor_sku) <= 31
+    assert "BACKDOOR" in backdoor_sku.split()
+
+
+def test_backdoor_attribute_helper_does_not_auto_inject_bcl() -> None:
+    engine = SKUIntelligenceEngine(
+        EngineConfig(
+            ontology_file=PARTS_ONTOLOGY_FILE,
+            dictionary_file=PARTS_DICTIONARY_FILE,
+            part_rules_file=PART_CODE_RULES_FILE,
+            enable_vector_layer=False,
+        )
+    )
+
+    assert engine._apply_backdoor_attributes("BDR", "back door black") == "BDR"
+    assert (
+        engine._apply_backdoor_attributes("BDR BCL", "back door with camera lens black")
+        == "BDR BCL"
+    )
+
+
 def test_pattern_generator_learns_frequent_ngrams(tmp_path: Path) -> None:
     input_path = tmp_path / "input.xlsx"
     output_path = tmp_path / "output.xlsx"
@@ -493,11 +648,20 @@ def test_pixel_longest_model_detection_stays_specific() -> None:
     assert analyze_title("pixel 8 ear speaker")["model"] == "PIXEL 8"
 
 
-def test_pixel_multi_model_compatibility_group_is_preserved() -> None:
-    assert (
-        generate_sku("Vibrator for Google Pixel 6 / 6A / 6 Pro / 7 / 7 Pro / 8 / 8 Pro")
-        == "PIXEL 6/6A/6PRO/7/7PRO/8/8PRO VIB"
+def test_pixel_multi_model_compatibility_group_is_length_limited() -> None:
+    sku = generate_sku(
+        "Vibrator for Google Pixel 6 / 6A / 6 Pro / 7 / 7 Pro / 8 / 8 Pro"
     )
+    assert sku == "PIXEL 6/6A/6PRO/7/7PRO/8 VIB"
+    assert len(sku) <= 31
+
+
+def test_single_title_backdoor_builder_enforces_hard_length_limit() -> None:
+    sku = generate_sku(
+        "Back Door for Google Pixel 6 / 6A / 6 Pro / 7 / 7 Pro / 8 / 8 Pro (Black)"
+    )
+    assert sku == "PIXEL 6/6A/6PRO BACKDOOR BLACK"
+    assert len(sku) <= 31
 
 
 def test_pixel_title_normalization_removes_supplier_noise() -> None:

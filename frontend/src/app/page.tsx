@@ -273,7 +273,7 @@ export default function Dashboard() {
   };
 
   const handleCopySku = async () => {
-    const sku = singleAnalysis?.sku?.trim();
+    const sku = singleAnalysis?.parse_status === "parsed" ? singleAnalysis.sku?.trim() : "";
     if (!sku) {
       return;
     }
@@ -324,7 +324,34 @@ export default function Dashboard() {
   }, [singleAnalysis]);
 
   const singleConfidence = singleAnalysis?.confidence ?? 0;
-  const singleConfidenceUi = confidenceMeta(singleConfidence);
+  const singleConfidenceUi = useMemo(() => {
+    if (singleAnalysis?.parse_status === "partial") {
+      return {
+        label: "Model",
+        badgeClass: "bg-blue-100 text-blue-700 border-blue-200",
+        barClass: "bg-blue-500",
+      };
+    }
+    return confidenceMeta(singleConfidence);
+  }, [singleAnalysis, singleConfidence]);
+  const singleSkuDisplay = useMemo(() => {
+    if (!singleAnalysis) {
+      return "—";
+    }
+    if (singleAnalysis.parse_status === "partial") {
+      return "ADD PART NAME";
+    }
+    return singleAnalysis.sku?.trim() || "—";
+  }, [singleAnalysis]);
+  const singleSkuHelpText = useMemo(() => {
+    if (!singleAnalysis) {
+      return "SKU Generated";
+    }
+    if (singleAnalysis.parse_status === "partial") {
+      return "Model identified. Add a part name to generate the final SKU.";
+    }
+    return "SKU Generated";
+  }, [singleAnalysis]);
 
   const singleAnalysisStatusMeta = useMemo(() => {
     if (isAnalyzingSingle) {
@@ -346,6 +373,13 @@ export default function Dashboard() {
         label: "Idle",
         className: "bg-gray-100 text-gray-600 border-gray-200",
         hint: "Start typing to analyze",
+      };
+    }
+    if (singleAnalysis.parse_status === "partial") {
+      return {
+        label: "Partial",
+        className: "bg-blue-100 text-blue-700 border-blue-200",
+        hint: "Model detected. Add part name to generate SKU",
       };
     }
     if (singleAnalysis.parse_status === "not_understandable") {
@@ -372,6 +406,9 @@ export default function Dashboard() {
   const analysisCardTone = useMemo(() => {
     if (singleAnalysisError || singleAnalysis?.parse_status === "not_understandable") {
       return "border-rose-200 bg-white shadow-sm ring-1 ring-rose-50";
+    }
+    if (singleAnalysis?.parse_status === "partial") {
+      return "border-blue-200 bg-white shadow-sm ring-1 ring-blue-50";
     }
     if ((singleAnalysis?.confidence ?? 0) >= 0.9) {
       return "border-emerald-200 bg-white shadow-sm ring-1 ring-emerald-50";
@@ -515,7 +552,20 @@ export default function Dashboard() {
                     <div className="flex items-center justify-between gap-3 rounded-xl border border-gray-200 bg-white shadow-sm px-4 py-3">
                       <div>
                         <p className="text-[10px] font-semibold uppercase tracking-widest text-gray-400 mb-0.5">SKU Generated</p>
-                        <p className="text-lg font-bold text-gray-900 tracking-tight">{singleAnalysis.sku || "—"}</p>
+                        <p className={`whitespace-pre-wrap font-mono ${singleAnalysis.parse_status === "partial" ? "text-sm font-semibold text-blue-700 tracking-normal" : "text-lg font-bold text-gray-900 tracking-normal"}`}>
+                          {singleSkuDisplay}
+                        </p>
+                        {singleAnalysis.parse_status === "parsed" && singleAnalysis.sku && (() => {
+                          const len = (singleAnalysis.sku?.trim() || "").length;
+                          const color = len >= 31 ? "text-rose-600 font-bold" : len >= 28 ? "text-amber-600 font-semibold" : "text-gray-400";
+                          return (
+                            <p className={`mt-0.5 text-[11px] tabular-nums ${color}`}>
+                              {len} / 31 characters
+                              {len >= 31 && <span className="ml-1 text-rose-500">⚠ over limit</span>}
+                            </p>
+                          );
+                        })()}
+                        <p className="mt-1 text-[11px] text-gray-500">{singleSkuHelpText}</p>
                       </div>
                       <div className="flex flex-col items-end gap-2 shrink-0">
                         <div className="flex items-center gap-2">
@@ -525,7 +575,7 @@ export default function Dashboard() {
                           <button
                             type="button"
                             onClick={handleCopySku}
-                            disabled={!singleAnalysis.sku}
+                            disabled={singleAnalysis.parse_status !== "parsed" || !singleAnalysis.sku}
                             className="inline-flex items-center justify-center h-7 w-7 rounded-md border border-gray-200 bg-gray-50 text-gray-600 transition-colors hover:bg-gray-100 disabled:cursor-not-allowed disabled:opacity-50"
                             title="Copy SKU"
                           >
@@ -535,6 +585,25 @@ export default function Dashboard() {
                         <div className="w-24 h-1.5 overflow-hidden rounded-full bg-gray-100">
                           <div className={`h-full rounded-full transition-all ${singleConfidenceUi.barClass}`} style={{ width: `${singleConfidencePercent}%` }} />
                         </div>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                      <div className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2">
+                        <p className="text-[10px] font-semibold uppercase tracking-widest text-gray-400">Brand</p>
+                        <p className="mt-1 text-sm font-semibold text-gray-900">{singleAnalysis.brand || "—"}</p>
+                      </div>
+                      <div className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2">
+                        <p className="text-[10px] font-semibold uppercase tracking-widest text-gray-400">Model</p>
+                        <p className="mt-1 text-sm font-semibold text-gray-900">{singleAnalysis.model || "—"}</p>
+                      </div>
+                      <div className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2">
+                        <p className="text-[10px] font-semibold uppercase tracking-widest text-gray-400">Code</p>
+                        <p className="mt-1 text-sm font-semibold text-gray-900">{singleAnalysis.model_code || "—"}</p>
+                      </div>
+                      <div className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2">
+                        <p className="text-[10px] font-semibold uppercase tracking-widest text-gray-400">Part</p>
+                        <p className="mt-1 text-sm font-semibold text-gray-900">{singleAnalysis.part || "—"}</p>
                       </div>
                     </div>
 
