@@ -6,6 +6,7 @@ from __future__ import annotations
 import json
 import re
 import sqlite3
+from difflib import SequenceMatcher
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -14,6 +15,8 @@ import pandas as pd
 
 from . import sku_parser
 from .sku_intelligence_engine import (
+    APPROVED_LEARNED_PATTERNS_FILE,
+    APPROVED_LEARNED_SPELLING_VARIATIONS_FILE,
     COLOR_DATASET_FILE,
     LEARNED_PATTERNS_FILE,
     LEARNED_SKU_CORRECTIONS_FILE,
@@ -42,7 +45,9 @@ class TrainingDashboardService:
         self.learned_sku_corrections_file = LEARNED_SKU_CORRECTIONS_FILE
         self.learned_rules_file = self.base_dir / "learned_rules.json"
         self.learned_patterns_file = LEARNED_PATTERNS_FILE
+        self.approved_learned_patterns_file = APPROVED_LEARNED_PATTERNS_FILE
         self.learned_spelling_file = LEARNED_SPELLING_VARIATIONS_FILE
+        self.approved_learned_spelling_file = APPROVED_LEARNED_SPELLING_VARIATIONS_FILE
         self.phrase_normalization_file = PHRASE_NORMALIZATION_FILE
         self.part_ontology_file = PART_ONTOLOGY_DATASET_FILE
         self.color_dataset_file = COLOR_DATASET_FILE
@@ -60,6 +65,10 @@ class TrainingDashboardService:
             {"sku_overrides": {}, "title_overrides": {}},
         )
         self._ensure_json_file(self.learned_rules_file, [])
+        self._ensure_json_file(self.learned_patterns_file, {})
+        self._ensure_json_file(self.approved_learned_patterns_file, {})
+        self._ensure_json_file(self.learned_spelling_file, {})
+        self._ensure_json_file(self.approved_learned_spelling_file, {})
 
     def _ensure_json_file(self, path: Path, seed: object) -> None:
         if path.exists():
@@ -125,6 +134,267 @@ class TrainingDashboardService:
     def _save_learned_patterns(self, mapping: dict[str, str]) -> None:
         ordered = dict(sorted(mapping.items(), key=lambda item: (-len(item[0]), item[0])))
         self._write_json(self.learned_patterns_file, ordered)
+
+    def _load_approved_learned_patterns(self) -> dict[str, str]:
+        data = self._read_json(self.approved_learned_patterns_file, {})
+        out: dict[str, str] = {}
+        if not isinstance(data, dict):
+            return out
+        for phrase, code in data.items():
+            key = self._normalize_phrase(phrase)
+            value = self._normalize_code(code)
+            if key and value:
+                out[key] = value
+        return out
+
+    def _save_approved_learned_patterns(self, mapping: dict[str, str]) -> None:
+        ordered = dict(sorted(mapping.items(), key=lambda item: (-len(item[0]), item[0])))
+        self._write_json(self.approved_learned_patterns_file, ordered)
+
+    def _load_candidate_spelling(self) -> dict[str, str]:
+        payload = self._read_json(self.learned_spelling_file, {})
+        out: dict[str, str] = {}
+        if not isinstance(payload, dict):
+            return out
+        for wrong, right in payload.items():
+            left = self._normalize_phrase(wrong)
+            value = self._normalize_phrase(right)
+            if left and value:
+                out[left] = value
+        return out
+
+    def _load_approved_spelling(self) -> dict[str, str]:
+        payload = self._read_json(self.approved_learned_spelling_file, {})
+        out: dict[str, str] = {}
+        if not isinstance(payload, dict):
+            return out
+        for wrong, right in payload.items():
+            left = self._normalize_phrase(wrong)
+            value = self._normalize_phrase(right)
+            if left and value:
+                out[left] = value
+        return out
+
+    def _save_approved_spelling(self, mapping: dict[str, str]) -> None:
+        self._write_json(self.approved_learned_spelling_file, dict(sorted(mapping.items())))
+
+    def _append_learned_rule_row(
+        self,
+        *,
+        kind: str,
+        source_text: str,
+        normalized_source: str,
+        mapped_value: str,
+        candidate_type: str | None = None,
+        review_status: str = "pending",
+        review_note: str = "",
+    ) -> None:
+        rule_rows = self._read_json(self.learned_rules_file, [])
+        if not isinstance(rule_rows, list):
+            rule_rows = []
+        rule_rows.append(
+            {
+                "kind": kind,
+                "candidate_type": str(candidate_type or kind).strip().lower(),
+                "source_text": source_text,
+                "normalized_source": self._normalize_phrase(normalized_source),
+                "mapped_value": self._normalize_code(mapped_value),
+                "review_status": str(review_status or "pending").strip().lower() or "pending",
+                "review_note": str(review_note or "").strip(),
+                "created_at": datetime.now(timezone.utc).isoformat(),
+            }
+        )
+        self._write_json(self.learned_rules_file, rule_rows[-5000:])
+
+    def _load_learned_rule_rows(self) -> list[dict[str, Any]]:
+        rows = self._read_json(self.learned_rules_file, [])
+        if not isinstance(rows, list):
+            return []
+        cleaned: list[dict[str, Any]] = []
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            cleaned.append(
+                {
+                    **row,
+                    "kind": str(row.get("kind", "")).strip().lower(),
+                    "candidate_type": str(row.get("candidate_type", row.get("kind", ""))).strip().lower(),
+                    "normalized_source": self._normalize_phrase(row.get("normalized_source", "")),
+                    "mapped_value": self._normalize_code(row.get("mapped_value", "")),
+                    "review_status": str(row.get("review_status", "pending")).strip().lower() or "pending",
+                    "review_note": str(row.get("review_note", "")).strip(),
+                }
+            )
+        return cleaned
+
+    def _save_learned_rule_rows(self, rows: list[dict[str, Any]]) -> None:
+        self._write_json(self.learned_rules_file, rows[-5000:])
+
+    def _candidate_review_index(self) -> dict[tuple[str, str, str], dict[str, str]]:
+        index: dict[tuple[str, str, str], dict[str, str]] = {}
+        for row in self._load_learned_rule_rows():
+            candidate_type = str(row.get("candidate_type", "")).strip().lower()
+            normalized_source = self._normalize_phrase(row.get("normalized_source", ""))
+            mapped_value = (
+                self._normalize_phrase(row.get("mapped_value", ""))
+                if candidate_type == "spelling"
+                else self._normalize_code(row.get("mapped_value", ""))
+            )
+            if not candidate_type or not normalized_source or not mapped_value:
+                continue
+            index[(candidate_type, normalized_source, mapped_value)] = {
+                "review_status": str(row.get("review_status", "pending")).strip().lower() or "pending",
+                "review_note": str(row.get("review_note", "")).strip(),
+            }
+        return index
+
+    def list_candidate_learning(self, *, limit: int = 250) -> dict[str, list[dict[str, str]]]:
+        review_index = self._candidate_review_index()
+        patterns: list[dict[str, str]] = []
+        for phrase, code in self._load_learned_patterns().items():
+            review = review_index.get(("pattern", phrase, self._normalize_code(code)), {})
+            patterns.append(
+                {
+                    "candidate_type": "pattern",
+                    "normalized_source": phrase.upper(),
+                    "mapped_value": self._normalize_code(code),
+                    "review_status": str(review.get("review_status", "pending")).upper(),
+                    "review_note": str(review.get("review_note", "")),
+                }
+            )
+        spellings: list[dict[str, str]] = []
+        for wrong, right in self._load_candidate_spelling().items():
+            review = review_index.get(("spelling", wrong, self._normalize_phrase(right)), {})
+            spellings.append(
+                {
+                    "candidate_type": "spelling",
+                    "normalized_source": wrong.upper(),
+                    "mapped_value": self._normalize_code(right),
+                    "review_status": str(review.get("review_status", "pending")).upper(),
+                    "review_note": str(review.get("review_note", "")),
+                }
+            )
+        return {
+            "patterns": patterns[:limit],
+            "spellings": spellings[:limit],
+        }
+
+    def review_candidate_learning(
+        self,
+        *,
+        candidate_type: str,
+        normalized_source: str,
+        mapped_value: str,
+        review_status: str,
+        review_note: str = "",
+    ) -> dict[str, str]:
+        candidate_kind = str(candidate_type or "").strip().lower()
+        if candidate_kind not in {"pattern", "spelling"}:
+            raise ValueError("candidate_type must be 'pattern' or 'spelling'.")
+        status = str(review_status or "").strip().lower()
+        if status not in {"approved", "rejected"}:
+            raise ValueError("review_status must be 'approved' or 'rejected'.")
+        source_key = self._normalize_phrase(normalized_source)
+        mapped_key = (
+            self._normalize_phrase(mapped_value)
+            if candidate_kind == "spelling"
+            else self._normalize_code(mapped_value)
+        )
+        if not source_key or not mapped_key:
+            raise ValueError("normalized_source and mapped_value are required.")
+
+        rows = self._load_learned_rule_rows()
+        matched = False
+        for row in rows:
+            row_candidate_type = str(row.get("candidate_type", "")).strip().lower()
+            row_source = self._normalize_phrase(row.get("normalized_source", ""))
+            row_value = (
+                self._normalize_phrase(row.get("mapped_value", ""))
+                if row_candidate_type == "spelling"
+                else self._normalize_code(row.get("mapped_value", ""))
+            )
+            if row_candidate_type == candidate_kind and row_source == source_key and row_value == mapped_key:
+                row["review_status"] = status
+                row["review_note"] = str(review_note or "").strip()
+                row["reviewed_at"] = datetime.now(timezone.utc).isoformat()
+                matched = True
+                break
+        if not matched:
+            rows.append(
+                {
+                    "kind": candidate_kind,
+                    "candidate_type": candidate_kind,
+                    "source_text": normalized_source,
+                    "normalized_source": source_key,
+                    "mapped_value": mapped_key,
+                    "review_status": status,
+                    "review_note": str(review_note or "").strip(),
+                    "created_at": datetime.now(timezone.utc).isoformat(),
+                    "reviewed_at": datetime.now(timezone.utc).isoformat(),
+                }
+            )
+        self._save_learned_rule_rows(rows)
+        return {
+            "candidate_type": candidate_kind,
+            "normalized_source": source_key.upper(),
+            "mapped_value": mapped_key.upper(),
+            "review_status": status.upper(),
+            "review_note": str(review_note or "").strip(),
+        }
+
+    def _is_phone_safe_candidate_phrase(self, phrase: str, sku_code: str) -> bool:
+        engine = self._engine()
+        if not phrase or not sku_code:
+            return False
+        blocked_tokens = {
+            "microsoft",
+            "surface",
+            "nintendo",
+            "switch",
+            "controller",
+            "wallet",
+            "kickstand",
+            "multiview",
+            "watch",
+            "laptop",
+            "macbookair",
+            "xbox",
+        }
+        phrase_tokens = set(self._normalize_phrase(phrase).split())
+        if phrase_tokens & blocked_tokens:
+            return False
+        if engine is not None and hasattr(engine, "_is_viable_learned_pattern"):
+            try:
+                if not bool(engine._is_viable_learned_pattern(self._normalize_phrase(phrase), self._normalize_code(sku_code))):
+                    return False
+            except Exception:
+                return False
+        return True
+
+    def _is_safe_spelling_candidate(self, wrong: str, right: str) -> bool:
+        wrong_norm = self._normalize_phrase(wrong)
+        right_norm = self._normalize_phrase(right)
+        if not wrong_norm or not right_norm:
+            return False
+        if " " in wrong_norm or " " in right_norm:
+            return False
+        if len(wrong_norm) < 3 or len(right_norm) < 3:
+            return False
+        blocked = {
+            "led",
+            "micro",
+            "cloud",
+            "model",
+            "slim",
+            "watch",
+            "base",
+            "all",
+            "box",
+        }
+        if wrong_norm in blocked:
+            return False
+        ratio = SequenceMatcher(a=wrong_norm, b=right_norm).ratio()
+        return ratio >= 0.55
 
     def _load_phrase_normalizations(self) -> tuple[dict[str, Any], dict[str, str]]:
         payload = self._read_json(self.phrase_normalization_file, {})
@@ -272,20 +542,30 @@ class TrainingDashboardService:
             examples = []
 
         phrase_payload, normalizations = self._load_phrase_normalizations()
-        spelling_data = self._read_json(self.learned_spelling_file, {})
-        if not isinstance(spelling_data, dict):
-            spelling_data = {}
+        candidate_spelling = self._load_candidate_spelling()
+        approved_spelling = self._load_approved_spelling()
 
         spelling_rows = [
             {"incorrect": wrong.upper(), "correct": self._normalize_code(right)}
-            for wrong, right in sorted(spelling_data.items())
+            for wrong, right in sorted({**approved_spelling, **candidate_spelling}.items())
             if self._normalize_phrase(wrong) and self._normalize_phrase(right)
+        ]
+
+        rules_rows = self._load_learned_rule_rows()
+
+        candidate_synonym_rows = [
+            {
+                "supplier_phrase": self._normalize_phrase(row.get("normalized_source", "")).upper(),
+                "standard_term": self._normalize_code(row.get("mapped_value", "")).upper(),
+            }
+            for row in rules_rows
+            if isinstance(row, dict) and str(row.get("kind", "")).strip().lower() == "synonym"
         ]
 
         synonym_rows = [
             {"supplier_phrase": src.upper(), "standard_term": dst.upper()}
             for src, dst in sorted(normalizations.items())
-        ]
+        ] + candidate_synonym_rows
 
         corrections_payload = self._load_sku_corrections_payload()
         sku_rows = [
@@ -298,38 +578,53 @@ class TrainingDashboardService:
             for src, dst in sorted(corrections_payload.get("title_overrides", {}).items())
         ]
 
-        rules_rows = self._read_json(self.learned_rules_file, [])
-        if not isinstance(rules_rows, list):
-            rules_rows = []
-
         learned_pattern_rows = [
             {"pattern": phrase.upper(), "sku_code": code}
             for phrase, code in list(self._load_learned_patterns().items())[:250]
         ]
+        candidate_learning = self.list_candidate_learning(limit=250)
+
+        approved_pattern_count = len(self._load_approved_learned_patterns())
+        candidate_pattern_count = len(self._load_learned_patterns())
 
         analytics = self.get_analytics()
+
+        # Cache these so they are not computed twice (data + meta count).
+        part_entries = self._part_ontology_entries()
+        color_entries = self._color_mappings()
 
         return {
             "analytics": analytics,
             "title_training_samples": examples[-200:],
             "synonym_mappings": synonym_rows[:500],
             "spelling_corrections": spelling_rows[:500],
-            "part_ontology": self._part_ontology_entries()[:1000],
-            "color_mappings": self._color_mappings()[:1000],
+            "part_ontology": part_entries[:1000],
+            "color_mappings": color_entries[:1000],
             "sku_corrections": sku_rows[:1000],
             "title_overrides": title_override_rows[:1000],
             "rule_definitions": rules_rows[-200:],
             "learned_pattern_preview": learned_pattern_rows,
+            "candidate_learning": candidate_learning,
             "meta": {
                 "synonym_count": len(normalizations),
                 "spelling_count": len(spelling_rows),
-                "part_mapping_count": len(self._part_ontology_entries()),
-                "color_mapping_count": len(self._color_mappings()),
+                "part_mapping_count": len(part_entries),
+                "color_mapping_count": len(color_entries),
                 "sku_correction_count": len(sku_rows),
                 "title_override_count": len(title_override_rows),
                 "rule_count": len(rules_rows),
                 "training_example_count": len(examples),
                 "normalization_dataset_loaded": bool(phrase_payload.get("normalizations", {})),
+                "approved_pattern_count": approved_pattern_count,
+                "candidate_pattern_count": candidate_pattern_count,
+                "approved_spelling_count": len(approved_spelling),
+                "candidate_spelling_count": len(candidate_spelling),
+                "pending_pattern_review_count": sum(
+                    1 for row in candidate_learning["patterns"] if row.get("review_status") == "PENDING"
+                ),
+                "pending_spelling_review_count": sum(
+                    1 for row in candidate_learning["spellings"] if row.get("review_status") == "PENDING"
+                ),
             },
         }
 
@@ -379,19 +674,23 @@ class TrainingDashboardService:
         if not src or not dst:
             raise ValueError("Supplier phrase and standard term are required.")
 
-        payload, normalizations = self._load_phrase_normalizations()
-        normalizations[src] = dst
-        payload["normalizations"] = dict(sorted(normalizations.items()))
-        self._write_json(self.phrase_normalization_file, payload)
-
-        # Promote phrase to learned patterns when standard term maps to a known part code.
+        # Candidate-only by default. Exact core normalization remains unchanged
+        # until an explicit promotion step approves the phrase.
         engine = self._engine()
+        std_code = ""
         if engine is not None:
             std_code = self._normalize_code(engine.part_dictionary.get(dst, ""))
             if std_code:
                 learned = self._load_learned_patterns()
                 learned[src] = std_code
                 self._save_learned_patterns(learned)
+        self._append_learned_rule_row(
+            kind="synonym",
+            source_text=supplier_phrase,
+            normalized_source=src,
+            mapped_value=std_code or dst,
+            candidate_type="pattern",
+        )
 
         self._reload_parser()
         return {"supplier_phrase": src.upper(), "standard_term": dst.upper()}
@@ -402,11 +701,16 @@ class TrainingDashboardService:
         if not wrong or not right:
             raise ValueError("Incorrect word and correct word are required.")
 
-        payload = self._read_json(self.learned_spelling_file, {})
-        if not isinstance(payload, dict):
-            payload = {}
+        payload = self._load_candidate_spelling()
         payload[wrong] = right
         self._write_json(self.learned_spelling_file, dict(sorted(payload.items())))
+        self._append_learned_rule_row(
+            kind="spelling",
+            source_text=incorrect_word,
+            normalized_source=wrong,
+            mapped_value=right,
+            candidate_type="spelling",
+        )
 
         self._reload_parser()
         return {"incorrect": wrong.upper(), "correct": right.upper()}
@@ -521,21 +825,70 @@ class TrainingDashboardService:
         learned[phrase] = code
         self._save_learned_patterns(learned)
 
-        rule_rows = self._read_json(self.learned_rules_file, [])
-        if not isinstance(rule_rows, list):
-            rule_rows = []
-        rule_rows.append(
-            {
-                "rule_text": raw,
-                "phrase": phrase.upper(),
-                "sku_code": code,
-                "created_at": datetime.now(timezone.utc).isoformat(),
-            }
+        self._append_learned_rule_row(
+            kind="rule",
+            source_text=raw,
+            normalized_source=phrase,
+            mapped_value=code,
+            candidate_type="pattern",
         )
-        self._write_json(self.learned_rules_file, rule_rows[-5000:])
 
         self._reload_parser()
         return {"rule_text": raw, "phrase": phrase.upper(), "sku_code": code}
+
+    def promote_candidate_learning(self) -> dict[str, int]:
+        review_index = self._candidate_review_index()
+        approved_patterns = self._load_approved_learned_patterns()
+        candidate_patterns = self._load_learned_patterns()
+        promoted_patterns = 0
+        rejected_patterns = 0
+        pending_patterns = 0
+        remaining_patterns: dict[str, str] = {}
+        for phrase, code in candidate_patterns.items():
+            review = review_index.get(("pattern", phrase, self._normalize_code(code)))
+            review_status = str((review or {}).get("review_status", "pending")).strip().lower()
+            if review_status == "approved" and self._is_phone_safe_candidate_phrase(phrase, code):
+                if approved_patterns.get(phrase) != code:
+                    approved_patterns[phrase] = code
+                    promoted_patterns += 1
+            elif review_status in {"approved", "rejected"}:
+                rejected_patterns += 1
+            else:
+                pending_patterns += 1
+                remaining_patterns[phrase] = code
+        self._save_approved_learned_patterns(approved_patterns)
+        self._save_learned_patterns(remaining_patterns)
+
+        approved_spelling = self._load_approved_spelling()
+        candidate_spelling = self._load_candidate_spelling()
+        promoted_spelling = 0
+        rejected_spelling = 0
+        pending_spelling = 0
+        remaining_spelling: dict[str, str] = {}
+        for wrong, right in candidate_spelling.items():
+            review = review_index.get(("spelling", wrong, self._normalize_phrase(right)))
+            review_status = str((review or {}).get("review_status", "pending")).strip().lower()
+            if review_status == "approved" and self._is_safe_spelling_candidate(wrong, right):
+                if approved_spelling.get(wrong) != right:
+                    approved_spelling[wrong] = right
+                    promoted_spelling += 1
+            elif review_status in {"approved", "rejected"}:
+                rejected_spelling += 1
+            else:
+                pending_spelling += 1
+                remaining_spelling[wrong] = right
+        self._save_approved_spelling(approved_spelling)
+        self._write_json(self.learned_spelling_file, dict(sorted(remaining_spelling.items())))
+
+        self._reload_parser()
+        return {
+            "promoted_patterns": promoted_patterns,
+            "rejected_patterns": rejected_patterns,
+            "pending_patterns": pending_patterns,
+            "promoted_spelling": promoted_spelling,
+            "rejected_spelling": rejected_spelling,
+            "pending_spelling": pending_spelling,
+        }
 
     def upload_training_dataset(self, file_path: Path) -> dict[str, object]:
         suffix = file_path.suffix.lower()
@@ -688,14 +1041,15 @@ class TrainingDashboardService:
 
     def live_test(self, title: str) -> dict[str, object]:
         parsed = sku_parser.analyze_title(title)
+        parse_status = parsed.get("parse_status", "not_understandable")
         return {
             "title": title,
             "detected_model": parsed.get("model", ""),
             "detected_part": parsed.get("part", ""),
             "detected_color": parsed.get("color", ""),
-            "generated_sku": parsed.get("sku", NOT_UNDERSTANDABLE),
+            "generated_sku": "" if parse_status == "partial" else parsed.get("sku", NOT_UNDERSTANDABLE),
             "confidence": float(parsed.get("confidence", 0.0) or 0.0),
             "corrections": parsed.get("corrections", []),
-            "parse_status": parsed.get("parse_status", "not_understandable"),
+            "parse_status": parse_status,
             "reason": parsed.get("reason", ""),
         }

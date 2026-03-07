@@ -25,6 +25,13 @@ from pydantic import BaseModel, Field, ValidationError
 
 from . import sku_parser
 from .sku_parser import NOT_UNDERSTANDABLE, analyze_title as rule_analyze_title
+from .sku_intelligence_engine import (
+    APPROVED_LEARNED_PATTERNS_FILE,
+    APPROVED_LEARNED_SPELLING_VARIATIONS_FILE,
+    LEARNED_PATTERNS_FILE,
+    LEARNED_SPELLING_VARIATIONS_FILE,
+    SKU_VARIANT_TOKENS,
+)
 
 try:
     from openai import OpenAI  # type: ignore
@@ -96,8 +103,26 @@ class ParsedSKUResult(BaseModel):
     model_code: str = ""
     primary_part: str = ""
     secondary_part: str | None = None
+    variant: str | None = None
+    color: str | None = None
     sku: str = NOT_UNDERSTANDABLE
     confidence: float = 0.0
+    rule_confidence: float = 0.0
+    final_confidence: float = 0.0
+    corrections: list[str] = Field(default_factory=list)
+    parse_stage: str = ""
+    ai_used: bool = False
+    validation_failed_reason: str = ""
+
+
+class AIInterpretationResult(BaseModel):
+    brand: str = ""
+    model: str = ""
+    model_code: str = ""
+    primary_part: str = ""
+    secondary_part: str | None = None
+    variant: str | None = None
+    color: str | None = None
     corrections: list[str] = Field(default_factory=list)
 
 
@@ -109,6 +134,9 @@ class StructuredParseExecution:
     parse_status: Literal["parsed", "partial", "not_understandable"]
     review_required: bool
     correction_pairs: list[dict[str, str]]
+    parse_stage: Literal["rule_only", "rule_normalized", "ai_assisted"]
+    ai_used: bool
+    validation_failed_reason: str
 
 
 class StructuredParseError(RuntimeError):
@@ -122,13 +150,15 @@ class StructuredSKUParserService:
         self,
         *,
         ai_model: str | None = None,
-        ai_threshold: float = 0.85,
+        ai_threshold: float = 0.40,
         review_threshold: float = 0.75,
+        rule_accept_threshold: float = 0.80,
         cache_size: int = 50_000,
         db_path: str | Path = "outputs/structured_sku_results.db",
         enable_ai: bool = True,
     ) -> None:
         self.ai_threshold = float(ai_threshold)
+        self.rule_accept_threshold = float(rule_accept_threshold)
         self.review_threshold = float(review_threshold)
         self.cache_size = int(cache_size)
 
@@ -148,6 +178,20 @@ class StructuredSKUParserService:
             self._gemini_timeout_seconds = float(os.getenv("GEMINI_TIMEOUT_SECONDS", "20"))
         except ValueError:
             self._gemini_timeout_seconds = 20.0
+        self.batch_ai_enabled = str(os.getenv("SKU_AI_BATCH_ENABLED", "false")).strip().lower() in {
+            "1",
+            "true",
+            "yes",
+            "on",
+        }
+        try:
+            self._ai_max_concurrent_requests = max(
+                1,
+                int(os.getenv("SKU_AI_MAX_CONCURRENT_REQUESTS", "2")),
+            )
+        except ValueError:
+            self._ai_max_concurrent_requests = 2
+        self._ai_request_semaphore = threading.BoundedSemaphore(self._ai_max_concurrent_requests)
 
         self._openai_client: Any | None = None
         self._ai_provider: Literal["gemini", "openai", "disabled"] = "disabled"
@@ -167,13 +211,20 @@ class StructuredSKUParserService:
                     self._ai_provider = "openai"
 
         if ai_model:
-            self.ai_model = ai_model
+            self.single_ai_model = ai_model
         elif self._ai_provider == "gemini":
-            self.ai_model = os.getenv("GEMINI_STRUCTURED_MODEL", "gemini-2.5-flash")
+            self.single_ai_model = os.getenv("SKU_AI_SINGLE_MODEL", "gemini-2.5-pro")
         elif self._ai_provider == "openai":
-            self.ai_model = os.getenv("OPENAI_STRUCTURED_MODEL", "gpt-5")
+            self.single_ai_model = os.getenv("SKU_AI_SINGLE_MODEL", "gpt-5")
         else:
-            self.ai_model = os.getenv("GEMINI_STRUCTURED_MODEL", "gemini-2.5-flash")
+            self.single_ai_model = os.getenv("SKU_AI_SINGLE_MODEL", "gemini-2.5-pro")
+        if self._ai_provider == "gemini":
+            self.batch_ai_model = os.getenv("SKU_AI_BATCH_MODEL", "gemini-2.5-flash")
+        elif self._ai_provider == "openai":
+            self.batch_ai_model = os.getenv("SKU_AI_BATCH_MODEL", self.single_ai_model)
+        else:
+            self.batch_ai_model = os.getenv("SKU_AI_BATCH_MODEL", "gemini-2.5-flash")
+        self.ai_model = self.single_ai_model
 
         self._ai_enabled = self._ai_provider in {"gemini", "openai"}
         if self._ai_provider == "openai":
@@ -186,6 +237,7 @@ class StructuredSKUParserService:
                 self._ai_enabled = False
 
         self._rule_allowed_codes = self._load_rule_allowed_codes()
+        self._rule_engine = sku_parser.get_engine()
 
     @property
     def ai_enabled(self) -> bool:
@@ -194,6 +246,25 @@ class StructuredSKUParserService:
     @property
     def ai_provider(self) -> str:
         return self._ai_provider if self._ai_enabled else "disabled"
+
+    @property
+    def ai_max_concurrent_requests(self) -> int:
+        return int(self._ai_max_concurrent_requests)
+
+    def learning_status(self) -> dict[str, int]:
+        def _count_dict(path: Path) -> int:
+            try:
+                payload = json.loads(path.read_text(encoding="utf-8"))
+            except Exception:
+                return 0
+            return len(payload) if isinstance(payload, dict) else 0
+
+        return {
+            "approved_pattern_count": _count_dict(APPROVED_LEARNED_PATTERNS_FILE),
+            "candidate_pattern_count": _count_dict(LEARNED_PATTERNS_FILE),
+            "approved_spelling_count": _count_dict(APPROVED_LEARNED_SPELLING_VARIATIONS_FILE),
+            "candidate_spelling_count": _count_dict(LEARNED_SPELLING_VARIATIONS_FILE),
+        }
 
     @staticmethod
     def _normalize_rule_code(value: object) -> str:
@@ -379,27 +450,45 @@ class StructuredSKUParserService:
         if normalized.secondary_part is not None:
             secondary = str(normalized.secondary_part).upper().strip()
             normalized.secondary_part = secondary or None
+        if normalized.variant is not None:
+            variant = str(normalized.variant or "").upper().strip()
+            normalized.variant = variant or None
+        if normalized.color is not None:
+            color = str(normalized.color or "").upper().strip()
+            normalized.color = color or None
         normalized.sku = str(normalized.sku or "").upper().strip() or NOT_UNDERSTANDABLE
         normalized.corrections = [str(item).strip() for item in normalized.corrections if str(item).strip()]
+        normalized.parse_stage = str(normalized.parse_stage or "").strip()
+        normalized.ai_used = bool(normalized.ai_used)
+        normalized.validation_failed_reason = str(normalized.validation_failed_reason or "").strip()
         if len(normalized.sku) > 31:
             normalized.sku = normalized.sku[:31].rstrip()
-        if normalized.confidence < 0:
-            normalized.confidence = 0.0
-        if normalized.confidence > 1:
-            normalized.confidence = 1.0
+        for field_name in ("confidence", "rule_confidence", "final_confidence"):
+            value = float(getattr(normalized, field_name, 0.0) or 0.0)
+            value = min(1.0, max(0.0, value))
+            setattr(normalized, field_name, value)
+        if normalized.final_confidence == 0.0 and normalized.confidence:
+            normalized.final_confidence = normalized.confidence
+        if normalized.confidence == 0.0 and normalized.final_confidence:
+            normalized.confidence = normalized.final_confidence
+        normalized.confidence = normalized.final_confidence
         return normalized
 
     @staticmethod
-    def _confidence_for_rule(parser_reason: str, corrections: list[str]) -> float:
+    def _confidence_for_rule(raw_confidence: float, parser_reason: str, corrections: list[str]) -> float:
+        if raw_confidence > 0:
+            return min(1.0, max(0.0, float(raw_confidence)))
+        if raw_confidence <= 0:
+            return 0.0
         reason = parser_reason.lower()
         fuzzy_markers = ("fuzzy", "dictionary", "phonetic", "vector", "semantic")
-        if any(marker in reason for marker in fuzzy_markers):
-            return 0.90
+        if any(marker in reason for marker in fuzzy_markers) or corrections:
+            return 0.72
         return 0.98
 
     @staticmethod
     def _confidence_for_ai() -> float:
-        return 0.80
+        return 0.35
 
     @staticmethod
     def derive_parse_status(parsed: ParsedSKUResult) -> Literal["parsed", "partial", "not_understandable"]:
@@ -433,6 +522,8 @@ class StructuredSKUParserService:
         )
         parser_reason = str(payload.get("reason", "rule"))
         correction_pairs, correction_strings = self._format_correction_pairs(payload.get("corrections", []))
+        raw_confidence = float(payload.get("confidence", 0.0) or 0.0)
+        rule_confidence = self._confidence_for_rule(raw_confidence, parser_reason, correction_strings)
 
         parsed = ParsedSKUResult(
             brand=str(payload.get("brand", "")),
@@ -440,25 +531,29 @@ class StructuredSKUParserService:
             model_code=str(payload.get("model_code", "")),
             primary_part=str(payload.get("part", "")),
             secondary_part=(str(payload.get("secondary_part", "")).strip() or None),
+            variant=(str(payload.get("variant", "")).strip() or None),
+            color=(str(payload.get("color", "")).strip() or None),
             sku=str(payload.get("sku", "")) or NOT_UNDERSTANDABLE,
-            confidence=self._confidence_for_rule(parser_reason, correction_strings),
+            confidence=rule_confidence,
+            rule_confidence=rule_confidence,
+            final_confidence=rule_confidence,
             corrections=correction_strings,
         )
         return self._normalize_structured_result(parsed), parser_reason, correction_pairs
 
     def _ai_prompt(self, *, title: str, rule_result: ParsedSKUResult) -> str:
         allowed_codes = sorted(self._rule_allowed_codes, key=len, reverse=True)
+        allowed_variants = sorted(set(SKU_VARIANT_TOKENS) | {"HLD"})
         return (
-            "You are a rule-driven TX Parts AI parser and SKU generator.\n"
-            "Use three stages internally: title understanding, parser normalization, SKU rule enforcement.\n"
-            "The same title must always generate the same SKU across single-title parsing and bulk parsing.\n"
+            "You are a rule-driven TX Parts AI title interpreter.\n"
+            "The rule parser remains authoritative and will rebuild the final SKU.\n"
             "ABSOLUTE RULES:\n"
             "- never invent abbreviations\n"
             "- use only official rule codes from the allowed list\n"
-            "- if no rule code is available, set primary_part='UNRESOLVED' and sku='"
-            f"{NOT_UNDERSTANDABLE}'\n"
-            "- SKU length must be <= 31 characters including spaces\n"
-            "- output uppercase values for brand/model/model_code/primary_part/secondary_part/sku\n"
+            "- do not generate or guess a SKU string\n"
+            "- the final SKU must be <= 31 characters including spaces after the rule engine rebuilds it\n"
+            "- if no rule code is available, set primary_part='UNRESOLVED'\n"
+            "- output uppercase values for brand/model/model_code/primary_part/secondary_part/variant/color\n"
             "NORMALIZATION RULES:\n"
             "- collapse part synonyms into one canonical rule code\n"
             "- never repeat duplicate attributes already covered by the rule code\n"
@@ -475,16 +570,17 @@ class StructuredSKUParserService:
             "- GALAXY NOTE20 -> model='GALAXY NOTE 20'\n"
             "Official allowed rule codes:\n"
             f"{', '.join(allowed_codes)}\n"
+            "Official allowed variant tokens:\n"
+            f"{', '.join(allowed_variants)}\n"
             "Return ONLY valid JSON matching this exact shape:\n"
             '{"brand":"","model":"","model_code":"","primary_part":"","secondary_part":null,'
-            '"sku":"","confidence":0.0,"corrections":[]}\n'
+            '"variant":null,"color":null,"corrections":[]}\n'
             "Field rules:\n"
             "- primary_part must be one allowed rule code OR UNRESOLVED\n"
             "- secondary_part must be null or one allowed rule code\n"
+            "- variant must be null or one or more allowed variant tokens separated by spaces\n"
+            "- color must be null or a known approved color phrase\n"
             "- corrections entries must look like WRONG->RIGHT\n"
-            "- confidence must be 0..1\n"
-            "- generated SKU must follow the normalized rule code, not raw token matching\n"
-            f"- unknown/ambiguous titles must return sku='{NOT_UNDERSTANDABLE}'\n"
             "- no markdown, no comments, no extra keys\n"
             f"Product title: {title}\n"
             f"Rule parser candidate JSON: {rule_result.model_dump_json()}"
@@ -499,83 +595,146 @@ class StructuredSKUParserService:
             return True
         return normalized.endswith("-F") or normalized.endswith("-FC")
 
-    def _compose_ai_sku(self, parsed: ParsedSKUResult) -> str:
-        model = str(parsed.model or "").upper().strip()
-        primary = self._normalize_rule_code(parsed.primary_part)
-        secondary = self._normalize_rule_code(parsed.secondary_part or "")
-        model_code = str(parsed.model_code or "").upper().strip()
+    def _normalize_ai_interpretation(self, parsed: AIInterpretationResult) -> AIInterpretationResult:
+        normalized = parsed.model_copy(deep=True)
+        normalized.brand = str(normalized.brand or "").upper().strip()
+        normalized.model = str(normalized.model or "").upper().strip()
+        normalized.model_code = str(normalized.model_code or "").upper().strip()
+        normalized.primary_part = str(normalized.primary_part or "").upper().strip()
+        if normalized.secondary_part is not None:
+            normalized.secondary_part = str(normalized.secondary_part or "").upper().strip() or None
+        if normalized.variant is not None:
+            normalized.variant = str(normalized.variant or "").upper().strip() or None
+        if normalized.color is not None:
+            normalized.color = str(normalized.color or "").upper().strip() or None
+        normalized.corrections = [str(item).strip() for item in normalized.corrections if str(item).strip()]
+        return normalized
 
-        if not model or not primary or primary == UNRESOLVED_PART:
-            return NOT_UNDERSTANDABLE
+    def _normalize_variant_value(self, value: str) -> str:
+        allowed_tokens = set(SKU_VARIANT_TOKENS) | {"HLD"}
+        tokens = [
+            token
+            for token in self._normalize_rule_code(value).split()
+            if token in allowed_tokens
+        ]
+        return " ".join(tokens)
 
-        tokens: list[str] = [model]
+    def _validate_ai_color(self, color_value: str, *, brand: str) -> str:
+        if not color_value:
+            return ""
+        engine = self._rule_engine or sku_parser.get_engine()
+        normalized = self.normalize_title(color_value)
+        if not normalized:
+            return ""
+        pixel_brand = str(brand or "").upper().strip() == "PIXEL"
+        return str(engine._detect_color(normalized, compress=not pixel_brand) or "").upper().strip()
 
-        # Removed: internal model_code is no longer included in the generated SKU
-
-        tokens.extend(primary.split())
-        if secondary:
-            tokens.extend(secondary.split())
-
-        sku = RE_MULTI_SPACE.sub(" ", " ".join(tokens)).strip()
-        if len(sku) <= 31:
-            return sku
-
-        if model_code:
-            compact = RE_MULTI_SPACE.sub(" ", " ".join([model] + primary.split() + (secondary.split() if secondary else []))).strip()
-            if len(compact) <= 31:
-                return compact
-
-        return NOT_UNDERSTANDABLE
-
-    def _validate_ai_result(self, parsed: ParsedSKUResult) -> ParsedSKUResult | None:
-        raw_sku = str(parsed.sku or "").upper().strip()
-        if raw_sku and raw_sku != NOT_UNDERSTANDABLE and len(raw_sku) > 31:
-            LOGGER.warning("Rejecting AI result due to SKU length > 31: %s", raw_sku)
+    def _validate_ai_brand_model(
+        self,
+        *,
+        brand: str,
+        model: str,
+        model_code: str,
+        rule_result: ParsedSKUResult,
+    ) -> tuple[str, str, str] | None:
+        engine = self._rule_engine or sku_parser.get_engine()
+        brand_norm = str(brand or "").upper().strip()
+        model_norm = str(model or "").upper().strip()
+        if not brand_norm or not model_norm:
             return None
+        dataset_brand, dataset_model, dataset_model_code = engine._detect_brand_model_from_dataset(
+            self.normalize_title(" ".join(part for part in (brand_norm, model_norm, model_code) if part))
+        )
+        if dataset_brand and dataset_model:
+            resolved_code = str(model_code or dataset_model_code or rule_result.model_code or "").upper().strip()
+            return dataset_brand, dataset_model, resolved_code
+        if (
+            brand_norm == str(rule_result.brand or "").upper().strip()
+            and model_norm == str(rule_result.model or "").upper().strip()
+        ):
+            resolved_code = str(model_code or rule_result.model_code or "").upper().strip()
+            return brand_norm, model_norm, resolved_code
+        return None
 
-        normalized = self._normalize_structured_result(parsed)
-        primary_norm = self._normalize_rule_code(normalized.primary_part)
+    def _validate_ai_result(
+        self,
+        parsed: AIInterpretationResult,
+        *,
+        title: str,
+        rule_result: ParsedSKUResult,
+    ) -> ParsedSKUResult | None:
+        normalized = self._normalize_ai_interpretation(parsed)
+        engine = self._rule_engine or sku_parser.get_engine()
+
+        brand = normalized.brand or str(rule_result.brand or "").upper().strip()
+        model = normalized.model or str(rule_result.model or "").upper().strip()
+        model_code = normalized.model_code or str(rule_result.model_code or "").upper().strip()
+        primary_norm = self._normalize_rule_code(normalized.primary_part or rule_result.primary_part)
+        secondary_norm = self._normalize_rule_code(
+            normalized.secondary_part
+            if normalized.secondary_part is not None
+            else (rule_result.secondary_part or "")
+        )
 
         if primary_norm in {"", UNRESOLVED_PART}:
-            normalized.primary_part = UNRESOLVED_PART
-            normalized.secondary_part = None
-            normalized.sku = NOT_UNDERSTANDABLE
-            normalized.confidence = min(float(normalized.confidence or 0.0), 0.55)
-            return normalized
-
-        if not self._is_allowed_rule_code(normalized.primary_part):
-            LOGGER.warning(
-                "Rejecting AI result due to non-rule primary_part code: %s",
-                normalized.primary_part,
-            )
             return None
-
-        if normalized.secondary_part and not self._is_allowed_rule_code(normalized.secondary_part):
-            LOGGER.warning(
-                "Rejecting AI result due to non-rule secondary_part code: %s",
-                normalized.secondary_part,
-            )
+        if not self._is_allowed_rule_code(primary_norm):
+            LOGGER.warning("Rejecting AI result due to non-rule primary_part code: %s", primary_norm)
             return None
+        if secondary_norm and not self._is_allowed_rule_code(secondary_norm):
+            LOGGER.warning("Rejecting AI result due to non-rule secondary_part code: %s", secondary_norm)
+            return None
+        if secondary_norm == primary_norm:
+            secondary_norm = ""
+        elif self._is_flex_rule_code(primary_norm) and self._is_flex_rule_code(secondary_norm):
+            secondary_norm = ""
 
-        normalized.primary_part = primary_norm
-        if normalized.secondary_part:
-            normalized.secondary_part = self._normalize_rule_code(normalized.secondary_part)
-            if normalized.secondary_part == primary_norm:
-                normalized.secondary_part = None
-            elif self._is_flex_rule_code(primary_norm) and self._is_flex_rule_code(normalized.secondary_part):
-                normalized.secondary_part = None
+        validated_brand_model = self._validate_ai_brand_model(
+            brand=brand,
+            model=model,
+            model_code=model_code,
+            rule_result=rule_result,
+        )
+        if validated_brand_model is None:
+            LOGGER.warning("Rejecting AI result because brand/model did not validate against the dataset")
+            return None
+        brand, model, model_code = validated_brand_model
 
-        rebuilt_sku = self._compose_ai_sku(normalized)
-        if rebuilt_sku == NOT_UNDERSTANDABLE:
+        variant = self._normalize_variant_value(normalized.variant or "")
+        color = self._validate_ai_color(normalized.color or "", brand=brand)
+
+        normalized_title = engine.normalize_text(title)
+        part_code = " ".join(token for token in (primary_norm, secondary_norm) if token).strip()
+        part_code = engine._apply_backdoor_attributes(part_code, normalized_title)
+        part_code = engine._apply_contextual_part_code_rules(part_code, brand, normalized_title)
+        part_code = engine._apply_sim_tray_mode(part_code, normalized_title)
+        part_code = engine._apply_pixel_part_overrides(part_code, brand, normalized_title)
+        primary_part, secondary_part = engine._split_primary_secondary_part(part_code)
+        rebuilt_sku = engine._build_sku(brand, model, model_code, part_code, variant, color)
+        if not rebuilt_sku or rebuilt_sku == NOT_UNDERSTANDABLE or len(rebuilt_sku) > 31:
             LOGGER.warning(
                 "Rejecting AI result because structured fields could not produce a valid SKU: %s",
                 normalized.model_dump_json(),
             )
             return None
 
-        normalized.sku = rebuilt_sku
-        normalized.confidence = self._confidence_for_ai()
-        return normalized
+        final_confidence = max(self._confidence_for_ai(), min(0.60, float(rule_result.rule_confidence or rule_result.confidence or 0.0) + 0.10))
+        return self._normalize_structured_result(
+            ParsedSKUResult(
+                brand=brand,
+                model=model,
+                model_code=model_code,
+                primary_part=primary_part,
+                secondary_part=secondary_part or None,
+                variant=variant or None,
+                color=color or None,
+                sku=rebuilt_sku,
+                confidence=final_confidence,
+                rule_confidence=float(rule_result.rule_confidence or rule_result.confidence or 0.0),
+                final_confidence=final_confidence,
+                corrections=list(dict.fromkeys([*rule_result.corrections, *normalized.corrections])),
+            )
+        )
 
     @staticmethod
     def _strip_json_wrappers(text: str) -> str:
@@ -604,7 +763,13 @@ class StructuredSKUParserService:
             return ssl.create_default_context(cafile=certifi.where())
         return ssl.create_default_context()
 
-    def _parse_with_gemini_once(self, *, title: str, rule_result: ParsedSKUResult) -> ParsedSKUResult | None:
+    def _parse_with_gemini_once(
+        self,
+        *,
+        title: str,
+        rule_result: ParsedSKUResult,
+        model_name: str,
+    ) -> ParsedSKUResult | None:
         if not self._gemini_api_key:
             return None
 
@@ -617,7 +782,7 @@ class StructuredSKUParserService:
             },
         }
         encoded = json.dumps(request_payload).encode("utf-8")
-        model_candidates = [self.ai_model]
+        model_candidates = [model_name]
         if "gemini-2.5-flash" not in model_candidates:
             model_candidates.append("gemini-2.5-flash")
 
@@ -673,24 +838,30 @@ class StructuredSKUParserService:
                 except Exception:
                     continue
                 try:
-                    parsed = ParsedSKUResult.model_validate(candidate_payload)
+                    parsed = AIInterpretationResult.model_validate(candidate_payload)
                 except ValidationError:
                     continue
-                validated = self._validate_ai_result(parsed)
+                validated = self._validate_ai_result(parsed, title=title, rule_result=rule_result)
                 if validated is not None:
                     return validated
 
         return None
 
-    def _parse_with_openai_once(self, *, title: str, rule_result: ParsedSKUResult) -> ParsedSKUResult | None:
+    def _parse_with_openai_once(
+        self,
+        *,
+        title: str,
+        rule_result: ParsedSKUResult,
+        model_name: str,
+    ) -> ParsedSKUResult | None:
         if self._openai_client is None:
             return None
 
         try:
             response = self._openai_client.responses.parse(
-                model=self.ai_model,
+                model=model_name,
                 input=self._ai_prompt(title=title, rule_result=rule_result),
-                response_format=ParsedSKUResult,
+                response_format=AIInterpretationResult,
             )
         except Exception:
             LOGGER.exception("OpenAI structured parse request failed")
@@ -709,27 +880,119 @@ class StructuredSKUParserService:
             return None
 
         try:
-            parsed = candidate if isinstance(candidate, ParsedSKUResult) else ParsedSKUResult.model_validate(candidate)
+            parsed = (
+                candidate
+                if isinstance(candidate, AIInterpretationResult)
+                else AIInterpretationResult.model_validate(candidate)
+            )
         except ValidationError:
-            LOGGER.exception("OpenAI output failed ParsedSKUResult validation")
+            LOGGER.exception("OpenAI output failed AIInterpretationResult validation")
             return None
 
-        return self._validate_ai_result(parsed)
+        return self._validate_ai_result(parsed, title=title, rule_result=rule_result)
 
-    def _parse_with_ai_once(self, *, title: str, rule_result: ParsedSKUResult) -> ParsedSKUResult | None:
+    def _parse_with_ai_once(
+        self,
+        *,
+        title: str,
+        rule_result: ParsedSKUResult,
+        mode: Literal["single", "batch"],
+    ) -> ParsedSKUResult | None:
         if not self._ai_enabled:
             return None
-        if self._ai_provider == "gemini":
-            return self._parse_with_gemini_once(title=title, rule_result=rule_result)
-        if self._ai_provider == "openai":
-            return self._parse_with_openai_once(title=title, rule_result=rule_result)
-        return None
+        acquired = self._ai_request_semaphore.acquire(timeout=0.5)
+        if not acquired:
+            LOGGER.warning("Skipping AI fallback because the AI concurrency limit is saturated")
+            return None
+        try:
+            model_name = self.single_ai_model if mode == "single" else self.batch_ai_model
+            if self._ai_provider == "gemini":
+                return self._parse_with_gemini_once(
+                    title=title,
+                    rule_result=rule_result,
+                    model_name=model_name,
+                )
+            if self._ai_provider == "openai":
+                return self._parse_with_openai_once(
+                    title=title,
+                    rule_result=rule_result,
+                    model_name=model_name,
+                )
+            return None
+        finally:
+            self._ai_request_semaphore.release()
 
-    def _parse_with_ai_retry(self, *, title: str, rule_result: ParsedSKUResult) -> ParsedSKUResult | None:
-        first = self._parse_with_ai_once(title=title, rule_result=rule_result)
+    def _parse_with_ai_retry(
+        self,
+        *,
+        title: str,
+        rule_result: ParsedSKUResult,
+        mode: Literal["single", "batch"],
+    ) -> ParsedSKUResult | None:
+        first = self._parse_with_ai_once(title=title, rule_result=rule_result, mode=mode)
         if first is not None:
             return first
-        return self._parse_with_ai_once(title=title, rule_result=rule_result)
+        return self._parse_with_ai_once(title=title, rule_result=rule_result, mode=mode)
+
+    def _should_use_ai_fallback(
+        self,
+        *,
+        title: str,
+        rule_result: ParsedSKUResult,
+        allow_ai: bool,
+        mode: Literal["single", "batch"],
+        parser_reason: str,
+    ) -> bool:
+        if not allow_ai or not self._ai_enabled:
+            return False
+        rule_confidence = float(rule_result.rule_confidence or rule_result.confidence or 0.0)
+        if rule_confidence >= self.ai_threshold:
+            return False
+        parse_status = self.derive_parse_status(rule_result)
+        normalized_title = self.normalize_title(title)
+        if (
+            parse_status == "partial"
+            and str(rule_result.model or "").strip()
+            and not str(rule_result.primary_part or "").strip()
+            and normalized_title
+        ):
+            # Model-only titles should remain partial rather than letting AI guess a part.
+            return False
+        if mode == "batch" and not self.batch_ai_enabled:
+            return False
+        if self._is_simple_rule_result(rule_result=rule_result, parser_reason=parser_reason):
+            return False
+        return True
+
+    def _is_simple_rule_result(self, *, rule_result: ParsedSKUResult, parser_reason: str) -> bool:
+        if self.derive_parse_status(rule_result) != "parsed":
+            return False
+        if not str(rule_result.brand or "").strip():
+            return False
+        if not str(rule_result.model or "").strip():
+            return False
+        if not str(rule_result.primary_part or "").strip():
+            return False
+        if str(rule_result.secondary_part or "").strip():
+            return False
+        lowered_reason = str(parser_reason or "").lower()
+        if any(marker in lowered_reason for marker in ("fuzzy", "vector", "semantic", "catalog_title_fuzzy", "unresolved")):
+            return False
+        return True
+
+    def _derive_parse_stage(
+        self,
+        *,
+        source: Literal["rule", "ai", "cache"],
+        rule_result: ParsedSKUResult,
+        final_result: ParsedSKUResult,
+    ) -> Literal["rule_only", "rule_normalized", "ai_assisted"]:
+        if source == "ai":
+            return "ai_assisted"
+        rule_confidence = float(rule_result.rule_confidence or rule_result.confidence or 0.0)
+        if rule_confidence >= self.rule_accept_threshold:
+            return "rule_only"
+        return "rule_normalized"
 
     def analyze_title(
         self,
@@ -738,6 +1001,8 @@ class StructuredSKUParserService:
         product_sku: str = "",
         product_web_sku: str = "",
         product_description: str = "",
+        allow_ai: bool = True,
+        mode: Literal["single", "batch"] = "single",
     ) -> StructuredParseExecution:
         normalized_title = self.normalize_title(title)
         normalized_description = self.normalize_title(product_description)
@@ -765,6 +1030,9 @@ class StructuredSKUParserService:
                 parse_status=parse_status,
                 review_required=float(cached.confidence) < self.review_threshold,
                 correction_pairs=[],
+                parse_stage=(cached.parse_stage or "rule_only"),  # type: ignore[arg-type]
+                ai_used=bool(cached.ai_used),
+                validation_failed_reason=str(cached.validation_failed_reason or ""),
             )
 
         rule_result, parser_reason, correction_pairs = self._run_rule_parser(
@@ -776,17 +1044,47 @@ class StructuredSKUParserService:
 
         source: Literal["rule", "ai", "cache"] = "rule"
         final_result = rule_result
+        validation_failed_reason = ""
 
-        if rule_result.confidence < self.ai_threshold:
-            ai_result = self._parse_with_ai_retry(title=normalized_title, rule_result=rule_result)
-            if ai_result is None:
-                raise StructuredParseError("Unable to parse title")
-            final_result = ai_result
-            source = "ai"
-            parser_reason = "ai_structured_inference"
-            correction_pairs = []
+        if self._should_use_ai_fallback(
+            title=normalized_title,
+            rule_result=rule_result,
+            allow_ai=allow_ai,
+            mode=mode,
+            parser_reason=parser_reason,
+        ):
+            ai_result = self._parse_with_ai_retry(
+                title=normalized_title,
+                rule_result=rule_result,
+                mode=mode,
+            )
+            if ai_result is not None:
+                final_result = ai_result
+                source = "ai"
+                parser_reason = "ai_structured_inference"
+                correction_pairs = []
+            else:
+                parser_reason = f"{parser_reason}+ai_fallback_missed"
+                validation_failed_reason = "ai_validation_failed"
 
         parse_status = self.derive_parse_status(final_result)
+        if parse_status != "parsed" and not str(final_result.primary_part or "").strip():
+            final_result.variant = None
+            final_result.color = None
+        parse_stage = self._derive_parse_stage(
+            source=source,
+            rule_result=rule_result,
+            final_result=final_result,
+        )
+        final_result.rule_confidence = float(rule_result.rule_confidence or rule_result.confidence or 0.0)
+        if source == "ai":
+            final_result.final_confidence = float(final_result.final_confidence or final_result.confidence or 0.0)
+        else:
+            final_result.final_confidence = float(rule_result.rule_confidence or rule_result.confidence or 0.0)
+        final_result.confidence = float(final_result.final_confidence)
+        final_result.parse_stage = parse_stage
+        final_result.ai_used = source == "ai"
+        final_result.validation_failed_reason = validation_failed_reason
 
         self._cache_set(cache_key, final_result)
         self._log_result(
@@ -803,6 +1101,9 @@ class StructuredSKUParserService:
             parse_status=parse_status,
             review_required=float(final_result.confidence) < self.review_threshold,
             correction_pairs=correction_pairs,
+            parse_stage=parse_stage,
+            ai_used=source == "ai",
+            validation_failed_reason=validation_failed_reason,
         )
 
     def process_inventory_excel(
@@ -844,6 +1145,8 @@ class StructuredSKUParserService:
                     product_sku=product_sku,
                     product_web_sku=product_web_sku,
                     product_description=product_description,
+                    allow_ai=self.batch_ai_enabled,
+                    mode="batch",
                 )
                 parsed = execution.parsed
                 parse_status = execution.parse_status
@@ -868,11 +1171,18 @@ class StructuredSKUParserService:
                     "Parsed Model Code": parsed.model_code,
                     "Parsed Primary Part": parsed.primary_part,
                     "Parsed Secondary Part": parsed.secondary_part or "",
+                    "Parsed Variant": parsed.variant or "",
+                    "Parsed Color": parsed.color or "",
                     "Generated SKU": parsed.sku,
-                    "Confidence": float(parsed.confidence),
+                    "Rule Confidence": float(parsed.rule_confidence),
+                    "Final Confidence": float(parsed.final_confidence or parsed.confidence),
+                    "Confidence": float(parsed.final_confidence or parsed.confidence),
                     "Corrections": " | ".join(parsed.corrections),
                     "Parser Source": source,
                     "Parser Reason": parser_reason,
+                    "Parse Stage": execution.parse_stage,
+                    "AI Used": "YES" if execution.ai_used else "",
+                    "Validation Failed Reason": execution.validation_failed_reason,
                     "Parse Status": parse_status,
                     "Review Required": "YES" if float(parsed.confidence) < self.review_threshold else "",
                     "Parse Error": error,

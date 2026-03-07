@@ -80,9 +80,11 @@ DEVICE_MODEL_DATABASE_FILE = CORE_DATA_DIR / "device_model_database.json"
 LEARNED_TITLE_PATTERNS_FILE = RUNTIME_DATA_DIR / "learned_title_patterns.json"
 LEARNED_PARTS_FILE = RUNTIME_DATA_DIR / "learned_parts.json"
 LEARNED_PATTERNS_FILE = RUNTIME_DATA_DIR / "learned_patterns.json"
+APPROVED_LEARNED_PATTERNS_FILE = RUNTIME_DATA_DIR / "approved_learned_patterns.json"
 TRAINING_PATTERNS_FILE = RUNTIME_DATA_DIR / "training_patterns.json"
 UNKNOWN_LOG_FILE = RUNTIME_DATA_DIR / "unknown_parts_log.json"
 LEARNED_SPELLING_VARIATIONS_FILE = RUNTIME_DATA_DIR / "learned_spelling_variations.json"
+APPROVED_LEARNED_SPELLING_VARIATIONS_FILE = RUNTIME_DATA_DIR / "approved_learned_spelling_variations.json"
 LEARNED_SKU_CORRECTIONS_FILE = RUNTIME_DATA_DIR / "learned_sku_corrections.json"
 TX_PARTS_CATALOG_OVERLAY_FILE = RUNTIME_DATA_DIR / "tx_parts_catalog_overlay.json"
 TX_PARTS_TITLE_MEMORY_FILE = RUNTIME_DATA_DIR / "tx_parts_title_memory.json"
@@ -1036,15 +1038,19 @@ class EngineConfig:
     dictionary_file: Path = PARTS_DICTIONARY_FILE
     part_rules_file: Path = PART_CODE_RULES_FILE
     learned_patterns_file: Path = LEARNED_PATTERNS_FILE
+    approved_learned_patterns_file: Path = APPROVED_LEARNED_PATTERNS_FILE
     legacy_learned_title_patterns_file: Path = LEARNED_TITLE_PATTERNS_FILE
     legacy_learned_parts_file: Path = LEARNED_PARTS_FILE
     unknown_log_file: Path = UNKNOWN_LOG_FILE
     training_patterns_file: Path = TRAINING_PATTERNS_FILE
     spelling_corrections_file: Path = SPELLING_CORRECTIONS_FILE
     learned_spelling_variations_file: Path = LEARNED_SPELLING_VARIATIONS_FILE
+    approved_learned_spelling_variations_file: Path = APPROVED_LEARNED_SPELLING_VARIATIONS_FILE
     learned_sku_corrections_file: Path = LEARNED_SKU_CORRECTIONS_FILE
     catalog_training_file: Path = TX_PARTS_CATALOG_OVERLAY_FILE
     title_training_file: Path = TX_PARTS_TITLE_MEMORY_FILE
+    enable_candidate_learned_patterns: bool = False
+    enable_candidate_spelling_variations: bool = False
     max_sku_length: int = MAX_SKU_LENGTH
     unknown_promotion_threshold: int = 3
     spelling_promotion_threshold: int = 3
@@ -1217,12 +1223,14 @@ class SKUIntelligenceEngine:
         self._ensure_json_dict_file(self.config.dictionary_file, DEFAULT_MOBILE_PARTS_DICTIONARY)
         self._ensure_json_dict_file(self.config.part_rules_file, DEFAULT_PART_CODE_RULES)
         self._ensure_json_dict_file(self.config.learned_patterns_file, {})
+        self._ensure_json_dict_file(self.config.approved_learned_patterns_file, {})
         self._ensure_json_dict_file(self.config.legacy_learned_title_patterns_file, {})
         self._ensure_json_dict_file(self.config.legacy_learned_parts_file, {})
         self._ensure_json_list_file(self.config.unknown_log_file, [])
         self._ensure_json_dict_file(self.config.training_patterns_file, {})
         self._ensure_json_dict_file(self.config.spelling_corrections_file, DEFAULT_SPELLING_CORRECTIONS)
         self._ensure_json_dict_file(self.config.learned_spelling_variations_file, {})
+        self._ensure_json_dict_file(self.config.approved_learned_spelling_variations_file, {})
         self._ensure_json_object_file(
             self.config.learned_sku_corrections_file,
             {"sku_overrides": {}, "title_overrides": {}},
@@ -1449,11 +1457,14 @@ class SKUIntelligenceEngine:
 
     def _load_spelling_corrections(self) -> dict[str, str]:
         merged: dict[str, str] = {}
-        for source in (
+        sources = [
             DEFAULT_SPELLING_CORRECTIONS,
             self._load_json_dict(self.config.spelling_corrections_file),
-            self._load_json_dict(self.config.learned_spelling_variations_file),
-        ):
+            self._load_json_dict(self.config.approved_learned_spelling_variations_file),
+        ]
+        if self.config.enable_candidate_spelling_variations:
+            sources.append(self._load_json_dict(self.config.learned_spelling_variations_file))
+        for source in sources:
             for typo, canonical in source.items():
                 typo_key = self.normalize_phrase(typo)
                 canonical_key = self.normalize_phrase(canonical)
@@ -1705,11 +1716,16 @@ class SKUIntelligenceEngine:
 
     def _load_learned_patterns(self) -> dict[str, str]:
         merged: dict[str, str] = {}
-        for source in (
-            self._load_json_dict(self.config.learned_patterns_file),
-            self._load_json_dict(self.config.legacy_learned_title_patterns_file),
-            self._load_json_dict(self.config.legacy_learned_parts_file),
-        ):
+        sources = [self._load_json_dict(self.config.approved_learned_patterns_file)]
+        if self.config.enable_candidate_learned_patterns:
+            sources.extend(
+                (
+                    self._load_json_dict(self.config.learned_patterns_file),
+                    self._load_json_dict(self.config.legacy_learned_title_patterns_file),
+                    self._load_json_dict(self.config.legacy_learned_parts_file),
+                )
+            )
+        for source in sources:
             for phrase, code in source.items():
                 key = self.normalize_phrase(phrase)
                 value = self._canonicalize_part_code(code)
@@ -3157,9 +3173,10 @@ class SKUIntelligenceEngine:
             self.config.learned_spelling_variations_file,
             dict(sorted(learned.items())),
         )
-        self.spelling_corrections[typo] = canonical
-        self._correct_token_cached.cache_clear()
-        self._parse_cached.cache_clear()
+        if self.config.enable_candidate_spelling_variations:
+            self.spelling_corrections[typo] = canonical
+            self._correct_token_cached.cache_clear()
+            self._parse_cached.cache_clear()
 
     def _layer3_fuzzy_interpreter(self, normalized_title: str) -> tuple[str, str, float]:
         corrected_title, correction_confidence, correction_method, _corrections = self._normalize_with_token_corrections_scored(
@@ -4098,6 +4115,9 @@ class SKUIntelligenceEngine:
             tokens.insert(0, "BDR")
 
         if "BDR" in tokens:
+            if self._detect_backdoor_camera_lens(normalized_title) and "BCL" not in tokens:
+                insert_at = 1 if tokens and tokens[0] == "BDR" else len(tokens)
+                tokens.insert(insert_at, "BCL")
             # Keep BDR canonicalized as the primary part with optional BCL immediately after it.
             remainder = [token for token in tokens if token not in {"BDR", "BCL"}]
             out_tokens: list[str] = ["BDR"]
@@ -4134,11 +4154,6 @@ class SKUIntelligenceEngine:
             if " charging port board " in padded and not has_explicit_board_assembly:
                 tokens = ["CP" if token == "CP-B" else token for token in tokens]
                 code = " ".join(tokens)
-
-        tokens = [token for token in code.split() if token]
-        if self.normalize_code(brand) != "PIXEL" and "BDR" in tokens and "BCL" not in tokens:
-            remainder = [token for token in tokens if token != "BDR"]
-            code = " ".join(["BDR", "BCL", *remainder])
 
         return code
 
@@ -4570,6 +4585,8 @@ class SKUIntelligenceEngine:
             "model_code": parsed.model_code,
             "part": primary_part,
             "secondary_part": secondary_part,
+            "variant": parsed.variant,
+            "color": parsed.color,
             "sku": parsed.suggested_sku,
             "confidence": float(parsed.confidence_score),
             "decision": parsed.decision,

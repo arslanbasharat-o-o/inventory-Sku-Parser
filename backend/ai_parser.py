@@ -1,12 +1,8 @@
 #!/usr/bin/env python3
-"""AI-powered SKU parser using OpenAI Structured Outputs.
+"""Deprecated compatibility wrapper for structured SKU parsing.
 
-This module provides a hybrid parsing system:
-1. Run the rule-based SKU Intelligence Engine first.
-2. If rule confidence < AI_FALLBACK_THRESHOLD, call the OpenAI Responses API
-   with a strict Pydantic schema to guarantee a valid JSON output.
-3. Cache results by title hash to avoid duplicate API calls.
-4. Support batch processing of Excel inventory files.
+Public entry points delegate to backend.structured_sku_parser so the
+rule engine stays authoritative and AI only assists interpretation.
 """
 
 from __future__ import annotations
@@ -39,6 +35,7 @@ except ImportError:  # pragma: no cover
 # Internal rule-based engine
 # ---------------------------------------------------------------------------
 from .sku_parser import NOT_UNDERSTANDABLE, analyze_title as _rule_analyze
+from .structured_sku_parser import StructuredSKUParserService
 
 logger = logging.getLogger(__name__)
 
@@ -135,6 +132,7 @@ def clear_cache() -> None:
 # ---------------------------------------------------------------------------
 
 _client: OpenAI | None = None
+_structured_service: StructuredSKUParserService | None = None
 
 
 def _get_client() -> OpenAI | None:
@@ -151,6 +149,13 @@ def _get_client() -> OpenAI | None:
             return None
         _client = OpenAI(api_key=api_key)
     return _client
+
+
+def _get_structured_service() -> StructuredSKUParserService:
+    global _structured_service
+    if _structured_service is None:
+        _structured_service = StructuredSKUParserService(enable_ai=True)
+    return _structured_service
 
 
 # ---------------------------------------------------------------------------
@@ -285,54 +290,26 @@ def get_hybrid_result(
     Returns:
         ParsedSKUResult with structured fields.
     """
-    title = (title or "").strip()
-
-    # --- Cache hit ---
-    cached = _cache_get(title)
-    if cached is not None:
-        logger.debug("Cache hit for %r", title[:60])
-        return cached
-
-    # --- Rule-based pass ---
-    try:
-        rule_raw = _rule_analyze(
-            title=title,
-            product_sku_hint=product_sku_hint,
-            product_web_sku_hint=product_web_sku_hint,
-        )
-    except Exception as exc:  # pragma: no cover
-        logger.error("Rule engine failed for %r: %s", title[:60], exc)
-        rule_raw = {}
-
-    rule_result = _rule_to_parsed(rule_raw, title)
-
-    if rule_result.confidence >= AI_FALLBACK_THRESHOLD:
-        logger.debug(
-            "Rule confidence %.2f >= %.2f for %r — skipping AI",
-            rule_result.confidence,
-            AI_FALLBACK_THRESHOLD,
-            title[:60],
-        )
-        _cache_set(title, rule_result)
-        return rule_result
-
-    # --- AI fallback ---
-    logger.info(
-        "Rule confidence %.2f < %.2f for %r — calling AI",
-        rule_result.confidence,
-        AI_FALLBACK_THRESHOLD,
-        title[:60],
+    execution = _get_structured_service().analyze_title(
+        title=title,
+        product_sku=product_sku_hint,
+        product_web_sku=product_web_sku_hint,
+        allow_ai=True,
+        mode="single",
     )
-    ai_result = _ai_parse_title(title)
-
-    if ai_result is not None:
-        _cache_set(title, ai_result)
-        return ai_result
-
-    # AI unavailable / failed — return rule result as-is
-    logger.warning("AI fallback unavailable for %r — returning rule result", title[:60])
-    _cache_set(title, rule_result)
-    return rule_result
+    parsed = execution.parsed
+    return ParsedSKUResult(
+        brand=parsed.brand,
+        model=parsed.model,
+        model_code=parsed.model_code,
+        primary_part=parsed.primary_part,
+        secondary_part=parsed.secondary_part,
+        sku=parsed.sku,
+        confidence=float(parsed.final_confidence or parsed.confidence),
+        corrections=list(parsed.corrections),
+        needs_review=bool(execution.review_required),
+        source=execution.source,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -355,83 +332,13 @@ def process_inventory_excel(
         DataFrame with appended SKU columns.
     """
     input_path = Path(input_path)
-    if not input_path.exists():
-        raise FileNotFoundError(f"Input file not found: {input_path}")
-
-    logger.info("Loading inventory: %s", input_path)
-    if input_path.suffix.lower() == ".csv":
-        df = pd.read_csv(input_path, dtype=str).fillna("")
-    else:
-        df = pd.read_excel(input_path, dtype=str).fillna("")
-
-    # Detect columns
-    title_col = _find_column(df, ["Product Name", "Title", "Name", "product_name", "title"])
-    sku_col = _find_column(df, ["Product SKU", "SKU", "product_sku", "sku"])
-    web_sku_col = _find_column(df, ["Product Web SKU", "Web SKU", "product_web_sku", "web_sku"])
-
-    if title_col is None:
-        raise ValueError(
-            f"Could not find a title column in {input_path}. "
-            f"Expected one of: Product Name, Title, Name"
-        )
-
-    total = len(df)
-    logger.info("Processing %d rows…", total)
-
-    results: list[ParsedSKUResult] = []
-    for idx, row in df.iterrows():
-        raw_title = str(row.get(title_col, "") or "")
-        raw_sku = str(row.get(sku_col, "") or "") if sku_col else ""
-        raw_web_sku = str(row.get(web_sku_col, "") or "") if web_sku_col else ""
-
-        try:
-            result = get_hybrid_result(raw_title, raw_sku, raw_web_sku)
-        except Exception as exc:  # pragma: no cover
-            logger.error("Row %d failed: %s", idx, exc)
-            result = ParsedSKUResult(
-                brand="",
-                model="",
-                model_code="",
-                primary_part="",
-                secondary_part=None,
-                sku=NOT_UNDERSTANDABLE,
-                confidence=0.0,
-                corrections=[],
-                needs_review=True,
-                source="fallback",
-            )
-        results.append(result)
-
-        if (idx + 1) % 500 == 0:  # type: ignore[operator]
-            logger.info("  Processed %d / %d rows", idx + 1, total)
-
-    # Append output columns
-    df["AI_Brand"] = [r.brand for r in results]
-    df["AI_Model"] = [r.model for r in results]
-    df["AI_Model_Code"] = [r.model_code for r in results]
-    df["AI_Primary_Part"] = [r.primary_part for r in results]
-    df["AI_Secondary_Part"] = [r.secondary_part or "" for r in results]
-    df["AI_SKU"] = [r.sku for r in results]
-    df["AI_Confidence"] = [round(r.confidence, 4) for r in results]
-    df["AI_Corrections"] = [", ".join(r.corrections) for r in results]
-    df["AI_Needs_Review"] = [r.needs_review for r in results]
-    df["AI_Source"] = [r.source for r in results]
-
-    # Default output path
     if output_path is None:
-        output_path = input_path.with_name(
-            f"{input_path.stem}_sku_structured{input_path.suffix}"
-        )
-    output_path = Path(output_path)
-
-    logger.info("Exporting to %s", output_path)
-    if output_path.suffix.lower() == ".csv":
-        df.to_csv(output_path, index=False)
-    else:
-        df.to_excel(output_path, index=False, engine="openpyxl")
-
-    logger.info("Done. %d rows exported.", total)
-    return df
+        output_path = input_path.with_name(f"{input_path.stem}_sku_structured.xlsx")
+    return _get_structured_service().process_inventory_excel(
+        input_file=input_path,
+        output_file=Path(output_path),
+        title_column="Product Name",
+    )
 
 
 def _find_column(df: pd.DataFrame, candidates: list[str]) -> str | None:

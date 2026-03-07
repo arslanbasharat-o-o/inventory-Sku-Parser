@@ -18,13 +18,22 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel, Field
 
+from .bulk_job_runner import (
+    BulkJobError,
+    BulkJobTimeoutError,
+    MAX_CONCURRENT_BULK_JOBS,
+    bulk_job_slot,
+    load_processed_inventory_preview,
+    run_legacy_inventory_job,
+    run_structured_inventory_job,
+)
+from .bulk_job_queue import BulkJobQueueManager
 from .structured_sku_parser import (
     ParsedSKUResult,
     StructuredParseError,
     StructuredSKUParserService,
 )
 from .sku_parser import NOT_UNDERSTANDABLE as LEGACY_NOT_UNDERSTANDABLE
-from .sku_parser import process_inventory as legacy_process_inventory
 from .training_dashboard_service import TrainingDashboardService
 
 LOGGER = logging.getLogger(__name__)
@@ -50,17 +59,24 @@ class AnalyzeTitleResponse(BaseModel):
     model_code: str
     primary_part: str
     secondary_part: str | None
+    variant: str | None = None
+    color: str | None = None
     sku: str
     confidence: float
+    rule_confidence: float
+    final_confidence: float
     corrections: list[str]
 
     # Useful operational metadata for API clients.
-    parse_status: Literal["parsed", "not_understandable"]
+    parse_status: Literal["parsed", "partial", "not_understandable"]
+    parse_stage: Literal["rule_only", "rule_normalized", "ai_assisted"]
     parser_reason: str
     source: Literal["rule", "ai", "cache"]
+    ai_used: bool
     review_required: bool
     needs_review: bool
     interpreted_title: str
+    validation_failed_reason: str
 
     # Backward-compatible fields used by existing UI.
     part: str
@@ -83,7 +99,38 @@ class CacheStatusResponse(BaseModel):
     ai_enabled: bool
     ai_provider: str
     ai_model: str
+    single_ai_model: str
+    batch_ai_model: str
     ai_threshold: float
+    ai_single_threshold: float
+    rule_accept_threshold: float
+    ai_batch_enabled: bool
+    ai_max_concurrent_requests: int
+    approved_pattern_count: int
+    candidate_pattern_count: int
+    approved_spelling_count: int
+    candidate_spelling_count: int
+
+
+class CandidateLearningItem(BaseModel):
+    candidate_type: Literal["pattern", "spelling"]
+    normalized_source: str
+    mapped_value: str
+    review_status: Literal["PENDING", "APPROVED", "REJECTED"]
+    review_note: str = ""
+
+
+class CandidateLearningResponse(BaseModel):
+    patterns: list[CandidateLearningItem]
+    spellings: list[CandidateLearningItem]
+
+
+class CandidateReviewRequest(BaseModel):
+    candidate_type: Literal["pattern", "spelling"]
+    normalized_source: str
+    mapped_value: str
+    review_status: Literal["approved", "rejected"]
+    review_note: str = ""
 
 
 class TitleTrainingRequest(BaseModel):
@@ -128,15 +175,9 @@ class LiveTestRequest(BaseModel):
     title: str
 
 
-AI_THRESHOLD = float(os.getenv("SKU_AI_THRESHOLD", "0.85"))
+AI_THRESHOLD = float(os.getenv("SKU_AI_SINGLE_THRESHOLD", os.getenv("SKU_AI_THRESHOLD", "0.40")))
+RULE_ACCEPT_THRESHOLD = float(os.getenv("SKU_RULE_ACCEPT_THRESHOLD", "0.80"))
 REVIEW_THRESHOLD = float(os.getenv("SKU_REVIEW_THRESHOLD", "0.75"))
-AI_MODEL = (
-    os.getenv("SKU_AI_MODEL")
-    or os.getenv("GEMINI_STRUCTURED_MODEL")
-    or os.getenv("OPENAI_STRUCTURED_MODEL")
-    or "gemini-2.5-flash"
-)
-
 BASE_DIR = Path(__file__).resolve().parent.parent
 UPLOAD_DIR = Path(os.getenv("SKU_UPLOAD_DIR", str(BASE_DIR / "uploads"))).resolve()
 OUTPUT_DIR = Path(os.getenv("SKU_OUTPUT_DIR", str(BASE_DIR / "outputs"))).resolve()
@@ -144,14 +185,15 @@ UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
 PARSER_SERVICE = StructuredSKUParserService(
-    ai_model=AI_MODEL,
     ai_threshold=AI_THRESHOLD,
     review_threshold=REVIEW_THRESHOLD,
+    rule_accept_threshold=RULE_ACCEPT_THRESHOLD,
     cache_size=int(os.getenv("SKU_PARSE_CACHE_SIZE", "50000")),
     db_path=os.getenv("SKU_PARSE_DB_PATH", "outputs/structured_sku_results.db"),
     enable_ai=True,
 )
 TRAINING_SERVICE = TrainingDashboardService(structured_log_db_path=PARSER_SERVICE.db_path)
+BULK_JOB_QUEUE = BulkJobQueueManager(worker_count=MAX_CONCURRENT_BULK_JOBS)
 
 
 def _refresh_structured_cache() -> None:
@@ -187,7 +229,7 @@ app = FastAPI(
     version="3.0.0",
     description=(
         "Rule-first SKU parser with Gemini/OpenAI structured-output fallback. "
-        "When rule confidence < 0.85, AI structured parsing is used."
+        "Rule results are accepted at high confidence, and AI is only used for low-confidence interpretation."
     ),
 )
 
@@ -200,12 +242,13 @@ app.add_middleware(
 
 
 @app.get("/healthz")
-def healthz() -> dict[str, str]:
+def healthz() -> dict[str, str | int]:
     return {
         "status": "ok",
         "service": "sku-parser-analyzer-api",
         "ai": "enabled" if PARSER_SERVICE.ai_enabled else "disabled",
         "ai_provider": PARSER_SERVICE.ai_provider,
+        "bulk_workers": MAX_CONCURRENT_BULK_JOBS,
     }
 
 
@@ -237,9 +280,7 @@ def analyze_title_api(payload: AnalyzeTitleRequest) -> AnalyzeTitleResponse:
                 product_web_sku=payload.product_web_sku,
                 product_description=PARSER_SERVICE.normalize_title(payload.product_description),
             )
-            parse_status: Literal["parsed", "not_understandable"] = (
-                "parsed" if parsed.sku != LEGACY_NOT_UNDERSTANDABLE else "not_understandable"
-            )
+            parse_status = PARSER_SERVICE.derive_parse_status(parsed)
             execution = type("FallbackExecution", (), {})()
             execution.parsed = parsed
             execution.parse_status = parse_status
@@ -247,6 +288,9 @@ def analyze_title_api(payload: AnalyzeTitleRequest) -> AnalyzeTitleResponse:
             execution.source = "rule"
             execution.review_required = bool(float(parsed.confidence) < REVIEW_THRESHOLD)
             execution.correction_pairs = correction_pairs_raw
+            execution.parse_stage = "rule_only" if float(parsed.rule_confidence or parsed.confidence) >= RULE_ACCEPT_THRESHOLD else "rule_normalized"
+            execution.ai_used = False
+            execution.validation_failed_reason = "ai_unavailable_fallback"
         except Exception:
             return JSONResponse(status_code=422, content={"error": "Unable to parse title"})
     except ValueError as exc:
@@ -275,15 +319,22 @@ def analyze_title_api(payload: AnalyzeTitleRequest) -> AnalyzeTitleResponse:
         model_code=parsed.model_code,
         primary_part=parsed.primary_part,
         secondary_part=parsed.secondary_part,
-        sku=parsed.sku,
+        variant=parsed.variant,
+        color=parsed.color,
+        sku="" if execution.parse_status == "partial" else parsed.sku,
         confidence=float(parsed.confidence),
+        rule_confidence=float(parsed.rule_confidence),
+        final_confidence=float(parsed.final_confidence or parsed.confidence),
         corrections=list(parsed.corrections),
         parse_status=execution.parse_status,
+        parse_stage=execution.parse_stage,
         parser_reason=execution.parser_reason,
         source=execution.source,
+        ai_used=bool(execution.ai_used),
         review_required=bool(execution.review_required),
         needs_review=bool(execution.review_required),
         interpreted_title=title,
+        validation_failed_reason=execution.validation_failed_reason,
         part=parsed.primary_part,
         correction_pairs=correction_pairs,
     )
@@ -298,25 +349,39 @@ def process_inventory_excel_by_path(payload: BatchPathRequest) -> BatchPathRespo
         raise HTTPException(status_code=404, detail=f"Input file not found: {input_path}")
 
     try:
-        result_df = PARSER_SERVICE.process_inventory_excel(
-            input_file=input_path,
-            output_file=output_path,
-            title_column=payload.title_column,
-        )
+        with bulk_job_slot() as acquired:
+            if not acquired:
+                raise HTTPException(
+                    status_code=429,
+                    detail="Server is busy. Too many concurrent bulk parse jobs. Retry shortly.",
+                )
+            result = run_structured_inventory_job(
+                input_file=input_path,
+                output_file=output_path,
+                title_column=payload.title_column,
+            )
     except (FileNotFoundError, ValueError) as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except BulkJobTimeoutError as exc:
+        LOGGER.exception("process_inventory_excel_by_path timed out")
+        output_path.unlink(missing_ok=True)
+        raise HTTPException(status_code=504, detail=str(exc)) from exc
+    except BulkJobError as exc:
+        LOGGER.exception("process_inventory_excel_by_path failed in worker")
+        output_path.unlink(missing_ok=True)
+        raise HTTPException(status_code=500, detail=f"Batch processing failed: {exc}") from exc
     except Exception as exc:  # pragma: no cover - runtime safety
         LOGGER.exception("process_inventory_excel_by_path failed")
         raise HTTPException(status_code=500, detail=f"Batch processing failed: {exc}") from exc
 
     return BatchPathResponse(
         output_file=str(output_path),
-        rows_processed=int(len(result_df)),
+        rows_processed=int(result.get("rows_processed", 0)),
     )
 
 
 @app.post("/analyze-title/batch", response_class=FileResponse)
-async def analyze_batch(file: UploadFile = File(...)) -> FileResponse:
+def analyze_batch(file: UploadFile = File(...)) -> FileResponse:
     allowed_suffixes = {".xlsx", ".xls", ".csv"}
     suffix = Path(file.filename or "upload.xlsx").suffix.lower()
     if suffix not in allowed_suffixes:
@@ -334,13 +399,27 @@ async def analyze_batch(file: UploadFile = File(...)) -> FileResponse:
         tmp_out_path = tmp_out_path.with_suffix(".xlsx")
 
     try:
-        PARSER_SERVICE.process_inventory_excel(
-            input_file=tmp_in_path,
-            output_file=tmp_out_path,
-            title_column="Product Name",
-        )
+        with bulk_job_slot() as acquired:
+            if not acquired:
+                raise HTTPException(
+                    status_code=429,
+                    detail="Server is busy. Too many concurrent bulk parse jobs. Retry shortly.",
+                )
+            run_structured_inventory_job(
+                input_file=tmp_in_path,
+                output_file=tmp_out_path,
+                title_column="Product Name",
+            )
     except (FileNotFoundError, ValueError) as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except BulkJobTimeoutError as exc:
+        LOGGER.exception("Batch upload processing timed out")
+        tmp_out_path.unlink(missing_ok=True)
+        raise HTTPException(status_code=504, detail=str(exc)) from exc
+    except BulkJobError as exc:
+        LOGGER.exception("Batch upload processing failed in worker")
+        tmp_out_path.unlink(missing_ok=True)
+        raise HTTPException(status_code=500, detail=f"Batch processing failed: {exc}") from exc
     except Exception as exc:  # pragma: no cover - runtime safety
         LOGGER.exception("Batch upload processing failed")
         raise HTTPException(status_code=500, detail=f"Batch processing failed: {exc}") from exc
@@ -355,7 +434,7 @@ async def analyze_batch(file: UploadFile = File(...)) -> FileResponse:
 
 
 @app.post("/parse-inventory-api")
-async def parse_inventory_api(inventory_file: UploadFile = File(...)) -> dict[str, object]:
+def parse_inventory_api(inventory_file: UploadFile = File(...)) -> dict[str, object]:
     """Compatibility endpoint used by the existing Next.js bulk parser UI."""
     suffix = Path(inventory_file.filename or "inventory.xlsx").suffix.lower()
     if suffix not in {".xlsx", ".xlsm", ".xls", ".csv"}:
@@ -369,18 +448,42 @@ async def parse_inventory_api(inventory_file: UploadFile = File(...)) -> dict[st
     try:
         with input_path.open("wb") as out_fp:
             shutil.copyfileobj(inventory_file.file, out_fp)
-        result_df = legacy_process_inventory(input_path, output_path)
+        job_snapshot = BULK_JOB_QUEUE.submit_legacy_job(
+            input_file=input_path,
+            output_file=output_path,
+        )
     except Exception as exc:  # pragma: no cover - runtime safety
         LOGGER.exception("parse_inventory_api failed")
         raise HTTPException(status_code=500, detail=f"Processing failed: {exc}") from exc
 
-    preview_df = result_df.fillna("")
-    return {
-        "columns": list(preview_df.columns),
-        "rows": preview_df.to_dict(orient="records"),
-        "stats": _build_legacy_stats(result_df),
-        "download_file": output_path.name,
-    }
+    return JSONResponse(status_code=202, content=job_snapshot)
+
+
+@app.get("/parse-inventory-api/{job_id}")
+def parse_inventory_job_status(job_id: str) -> dict[str, object]:
+    snapshot = BULK_JOB_QUEUE.get_job(job_id)
+    if snapshot is None:
+        raise HTTPException(status_code=404, detail="Bulk parse job not found")
+
+    status = str(snapshot.get("status", "")).strip().lower()
+    if status == "completed":
+        output_path = OUTPUT_DIR / str(snapshot.get("download_file", ""))
+        if not output_path.exists():
+            raise HTTPException(status_code=500, detail="Bulk parse output file is missing")
+        result_df = load_processed_inventory_preview(output_path)
+        preview_df = result_df.fillna("")
+        return {
+            **snapshot,
+            "columns": list(preview_df.columns),
+            "rows": preview_df.to_dict(orient="records"),
+            "stats": _build_legacy_stats(result_df),
+            "download_file": output_path.name,
+        }
+
+    if status == "failed":
+        return snapshot
+
+    return snapshot
 
 
 @app.get("/download/{file_name}", response_class=FileResponse)
@@ -398,12 +501,23 @@ def download_file(file_name: str) -> FileResponse:
 
 @app.get("/cache/status", response_model=CacheStatusResponse)
 def cache_status() -> CacheStatusResponse:
+    learning_status = PARSER_SERVICE.learning_status()
     return CacheStatusResponse(
         cached_entries=PARSER_SERVICE.cache_entry_count(),
         ai_enabled=PARSER_SERVICE.ai_enabled,
         ai_provider=PARSER_SERVICE.ai_provider,
         ai_model=PARSER_SERVICE.ai_model,
+        single_ai_model=PARSER_SERVICE.single_ai_model,
+        batch_ai_model=PARSER_SERVICE.batch_ai_model,
         ai_threshold=AI_THRESHOLD,
+        ai_single_threshold=AI_THRESHOLD,
+        rule_accept_threshold=RULE_ACCEPT_THRESHOLD,
+        ai_batch_enabled=bool(PARSER_SERVICE.batch_ai_enabled),
+        ai_max_concurrent_requests=PARSER_SERVICE.ai_max_concurrent_requests,
+        approved_pattern_count=int(learning_status["approved_pattern_count"]),
+        candidate_pattern_count=int(learning_status["candidate_pattern_count"]),
+        approved_spelling_count=int(learning_status["approved_spelling_count"]),
+        candidate_spelling_count=int(learning_status["candidate_spelling_count"]),
     )
 
 
@@ -542,6 +656,49 @@ def training_add_rule(payload: RuleTrainingRequest) -> dict[str, object]:
     except Exception as exc:  # pragma: no cover - runtime safety
         LOGGER.exception("training_add_rule failed")
         raise HTTPException(status_code=500, detail=f"Failed to save rule: {exc}") from exc
+
+
+@app.post("/admin/training/promote-candidates")
+def training_promote_candidates() -> dict[str, int]:
+    try:
+        result = TRAINING_SERVICE.promote_candidate_learning()
+        _refresh_structured_cache()
+        return result
+    except Exception as exc:  # pragma: no cover - runtime safety
+        LOGGER.exception("training_promote_candidates failed")
+        raise HTTPException(status_code=500, detail=f"Failed to promote candidate learning: {exc}") from exc
+
+
+@app.get("/admin/training/candidates", response_model=CandidateLearningResponse)
+def training_candidate_learning() -> CandidateLearningResponse:
+    try:
+        payload = TRAINING_SERVICE.list_candidate_learning()
+        return CandidateLearningResponse(
+            patterns=[CandidateLearningItem(**row) for row in payload.get("patterns", [])],
+            spellings=[CandidateLearningItem(**row) for row in payload.get("spellings", [])],
+        )
+    except Exception as exc:  # pragma: no cover - runtime safety
+        LOGGER.exception("training_candidate_learning failed")
+        raise HTTPException(status_code=500, detail=f"Failed to load candidate learning: {exc}") from exc
+
+
+@app.post("/admin/training/review-candidate")
+def training_review_candidate(payload: CandidateReviewRequest) -> dict[str, str]:
+    try:
+        result = TRAINING_SERVICE.review_candidate_learning(
+            candidate_type=payload.candidate_type,
+            normalized_source=payload.normalized_source,
+            mapped_value=payload.mapped_value,
+            review_status=payload.review_status,
+            review_note=payload.review_note,
+        )
+        _refresh_structured_cache()
+        return result
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:  # pragma: no cover - runtime safety
+        LOGGER.exception("training_review_candidate failed")
+        raise HTTPException(status_code=500, detail=f"Failed to review candidate learning: {exc}") from exc
 
 
 @app.post("/admin/training/live-test")

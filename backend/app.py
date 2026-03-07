@@ -6,21 +6,27 @@ from __future__ import annotations
 import os
 import uuid
 import json
-from contextlib import contextmanager
 from datetime import datetime, timedelta
 from pathlib import Path
-from threading import BoundedSemaphore
 
 import pandas as pd
 from flask import Flask, flash, redirect, render_template, request, send_file, url_for
 from werkzeug.utils import secure_filename
 
+from .bulk_job_runner import (
+    BulkJobError,
+    BulkJobTimeoutError,
+    MAX_CONCURRENT_BULK_JOBS,
+    bulk_job_slot as parse_job_slot,
+    load_processed_inventory_preview,
+    run_legacy_inventory_job,
+)
+from .structured_sku_parser import StructuredParseError, StructuredSKUParserService
 from .sku_parser import (
     NOT_UNDERSTANDABLE,
     UNKNOWN_LOG_FILE,
     analyze_title,
     generate_sku,
-    process_inventory,
 )
 from .training_dashboard_service import TrainingDashboardService
 
@@ -31,20 +37,10 @@ OUTPUT_DIR = DATA_DIR / "outputs"
 LEGACY_SUGGESTION_FILE = BASE_DIR / "semantic_mapping_suggestions.log"
 ALLOWED_EXTENSIONS = {".xlsx", ".xlsm", ".xls"}
 MAX_UPLOAD_SIZE_BYTES = 20 * 1024 * 1024  # 20 MB
-MAX_CONCURRENT_PARSE_JOBS = max(1, int(os.getenv("MAX_CONCURRENT_PARSE_JOBS", "2")))
-PARSE_JOB_SEMAPHORE = BoundedSemaphore(value=MAX_CONCURRENT_PARSE_JOBS)
-
-
-@contextmanager
-def parse_job_slot():
-    """Best-effort backpressure guard for expensive parse jobs."""
-    acquired = PARSE_JOB_SEMAPHORE.acquire(blocking=False)
-    try:
-        yield acquired
-    finally:
-        if acquired:
-            PARSE_JOB_SEMAPHORE.release()
-
+MAX_CONCURRENT_PARSE_JOBS = MAX_CONCURRENT_BULK_JOBS
+AI_THRESHOLD = float(os.getenv("SKU_AI_SINGLE_THRESHOLD", os.getenv("SKU_AI_THRESHOLD", "0.40")))
+RULE_ACCEPT_THRESHOLD = float(os.getenv("SKU_RULE_ACCEPT_THRESHOLD", "0.80"))
+REVIEW_THRESHOLD = float(os.getenv("SKU_REVIEW_THRESHOLD", "0.75"))
 
 def create_app() -> Flask:
     """App factory for local/prod usage."""
@@ -55,6 +51,14 @@ def create_app() -> Flask:
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     training_service = TrainingDashboardService(
         structured_log_db_path=Path(os.getenv("SKU_PARSE_DB_PATH", "outputs/structured_sku_results.db"))
+    )
+    structured_parser_service = StructuredSKUParserService(
+        ai_threshold=AI_THRESHOLD,
+        review_threshold=REVIEW_THRESHOLD,
+        rule_accept_threshold=RULE_ACCEPT_THRESHOLD,
+        cache_size=int(os.getenv("SKU_PARSE_CACHE_SIZE", "50000")),
+        db_path=os.getenv("SKU_PARSE_DB_PATH", "outputs/structured_sku_results.db"),
+        enable_ai=True,
     )
 
     @app.route("/", methods=["GET", "POST"])
@@ -97,7 +101,16 @@ def create_app() -> Flask:
                 return redirect(url_for("index"))
             try:
                 uploaded_file.save(input_path)
-                output_df = process_inventory(input_path, output_path)
+                run_legacy_inventory_job(input_file=input_path, output_file=output_path)
+                output_df = load_processed_inventory_preview(output_path)
+            except BulkJobTimeoutError as exc:
+                output_path.unlink(missing_ok=True)
+                flash(str(exc), "error")
+                return redirect(url_for("index"))
+            except BulkJobError as exc:
+                output_path.unlink(missing_ok=True)
+                flash(f"Processing failed: {exc}", "error")
+                return redirect(url_for("index"))
             except Exception as exc:  # pragma: no cover - graceful UI error path
                 flash(f"Processing failed: {exc}", "error")
                 return redirect(url_for("index"))
@@ -144,7 +157,14 @@ def create_app() -> Flask:
                 }, 429
             try:
                 uploaded_file.save(input_path)
-                output_df = process_inventory(input_path, output_path)
+                run_legacy_inventory_job(input_file=input_path, output_file=output_path)
+                output_df = load_processed_inventory_preview(output_path)
+            except BulkJobTimeoutError as exc:
+                output_path.unlink(missing_ok=True)
+                return {"error": str(exc)}, 504
+            except BulkJobError as exc:
+                output_path.unlink(missing_ok=True)
+                return {"error": f"Processing failed: {exc}"}, 500
             except Exception as exc:
                 return {"error": f"Processing failed: {exc}"}, 500
 
@@ -208,47 +228,102 @@ def create_app() -> Flask:
             return {"error": "Provide at least a title or SKU hint."}, 400
 
         try:
-            parsed = analyze_title(
-                title,
-                product_sku_hint=product_sku,
-                product_web_sku_hint=product_web_sku,
-                product_description_hint=product_description,
+            execution = structured_parser_service.analyze_title(
+                title=title,
+                product_sku=product_sku,
+                product_web_sku=product_web_sku,
+                product_description=product_description,
             )
+        except StructuredParseError:
+            try:
+                parsed = analyze_title(
+                    title,
+                    product_sku_hint=product_sku,
+                    product_web_sku_hint=product_web_sku,
+                    product_description_hint=product_description,
+                )
+                confidence = float(parsed.get("confidence", 0.0) or 0.0)
+                part = str(parsed.get("part", "")).strip().upper()
+                secondary_part = str(parsed.get("secondary_part", "")).strip().upper()
+                parse_status = str(parsed.get("parse_status", "not_understandable")).strip().lower()
+                raw_corrections = parsed.get("corrections", [])
+                correction_pairs = []
+                if isinstance(raw_corrections, list):
+                    for item in raw_corrections:
+                        if not isinstance(item, dict):
+                            continue
+                        from_token = str(item.get("from", "")).strip()
+                        to_token = str(item.get("to", "")).strip()
+                        if from_token or to_token:
+                            correction_pairs.append({"from": from_token, "to": to_token})
+                return {
+                    "brand": str(parsed.get("brand", "")).strip().upper(),
+                    "model": str(parsed.get("model", "")).strip().upper(),
+                    "model_code": str(parsed.get("model_code", "")).strip().upper(),
+                    "primary_part": part,
+                    "part": part,
+                    "secondary_part": secondary_part or None,
+                    "variant": str(parsed.get("variant", "")).strip().upper() or None,
+                    "color": str(parsed.get("color", "")).strip().upper() or None,
+                    "sku": "" if parse_status == "partial" else str(parsed.get("sku", NOT_UNDERSTANDABLE)).strip().upper(),
+                    "confidence": confidence,
+                    "rule_confidence": confidence,
+                    "final_confidence": confidence,
+                    "corrections": raw_corrections if isinstance(raw_corrections, list) else [],
+                    "correction_pairs": correction_pairs,
+                    "interpreted_title": str(parsed.get("interpreted_title", title)).strip(),
+                    "parser_reason": f"{str(parsed.get('reason', 'rule_parser')).strip()}+ai_unavailable_fallback",
+                    "source": "rule",
+                    "review_required": confidence < REVIEW_THRESHOLD,
+                    "needs_review": confidence < REVIEW_THRESHOLD,
+                    "decision": str(parsed.get("decision", "")).strip(),
+                    "parse_status": parse_status,
+                    "parse_stage": "rule_only" if confidence >= RULE_ACCEPT_THRESHOLD else "rule_normalized",
+                    "ai_used": False,
+                    "validation_failed_reason": "ai_unavailable_fallback",
+                }
+            except Exception as exc:
+                return {"error": f"Failed to analyze title: {exc}"}, 500
+        except ValueError as exc:
+            return {"error": str(exc)}, 400
         except Exception as exc:
             return {"error": f"Failed to analyze title: {exc}"}, 500
 
-        confidence = float(parsed.get("confidence", 0.0) or 0.0)
-        part = str(parsed.get("part", "")).strip().upper()
-        secondary_part = str(parsed.get("secondary_part", "")).strip().upper()
-        raw_corrections = parsed.get("corrections", [])
+        parsed = execution.parsed
         correction_pairs = []
-        if isinstance(raw_corrections, list):
-            for item in raw_corrections:
-                if not isinstance(item, dict):
-                    continue
-                from_token = str(item.get("from", "")).strip()
-                to_token = str(item.get("to", "")).strip()
-                if from_token or to_token:
-                    correction_pairs.append({"from": from_token, "to": to_token})
+        for item in execution.correction_pairs:
+            if not isinstance(item, dict):
+                continue
+            from_token = str(item.get("from", "")).strip()
+            to_token = str(item.get("to", "")).strip()
+            if from_token or to_token:
+                correction_pairs.append({"from": from_token, "to": to_token})
 
         return {
-            "brand": str(parsed.get("brand", "")).strip().upper(),
-            "model": str(parsed.get("model", "")).strip().upper(),
-            "model_code": str(parsed.get("model_code", "")).strip().upper(),
-            "primary_part": part,
-            "part": part,
-            "secondary_part": secondary_part or None,
-            "sku": str(parsed.get("sku", NOT_UNDERSTANDABLE)).strip().upper(),
-            "confidence": confidence,
-            "corrections": raw_corrections if isinstance(raw_corrections, list) else [],
+            "brand": parsed.brand,
+            "model": parsed.model,
+            "model_code": parsed.model_code,
+            "primary_part": parsed.primary_part,
+            "part": parsed.primary_part,
+            "secondary_part": parsed.secondary_part,
+            "variant": parsed.variant,
+            "color": parsed.color,
+            "sku": "" if execution.parse_status == "partial" else parsed.sku,
+            "confidence": float(parsed.confidence),
+            "rule_confidence": float(parsed.rule_confidence),
+            "final_confidence": float(parsed.final_confidence or parsed.confidence),
+            "corrections": list(parsed.corrections),
             "correction_pairs": correction_pairs,
-            "interpreted_title": str(parsed.get("interpreted_title", title)).strip(),
-            "parser_reason": str(parsed.get("reason", "rule_parser")).strip(),
-            "source": "rule",
-            "review_required": confidence < 0.75,
-            "needs_review": confidence < 0.75,
-            "decision": str(parsed.get("decision", "")).strip(),
-            "parse_status": str(parsed.get("parse_status", "not_understandable")).strip().lower(),
+            "interpreted_title": title,
+            "parser_reason": execution.parser_reason,
+            "source": execution.source,
+            "review_required": execution.review_required,
+            "needs_review": execution.review_required,
+            "decision": "",
+            "parse_status": execution.parse_status,
+            "parse_stage": execution.parse_stage,
+            "ai_used": execution.ai_used,
+            "validation_failed_reason": execution.validation_failed_reason,
         }
 
     @app.route("/healthz", methods=["GET"])
@@ -265,6 +340,13 @@ def create_app() -> Flask:
             return training_service.get_bootstrap()
         except Exception as exc:
             return {"error": f"Failed to load training dashboard data: {exc}"}, 500
+
+    @app.route("/admin/training/promote-candidates", methods=["POST"])
+    def admin_training_promote_candidates():
+        try:
+            return training_service.promote_candidate_learning()
+        except Exception as exc:
+            return {"error": f"Failed to promote candidate learning: {exc}"}, 500
 
     @app.route("/admin/training/analytics", methods=["GET"])
     def admin_training_analytics():

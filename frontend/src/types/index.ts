@@ -41,17 +41,24 @@ export interface AnalyzeTitleResponse {
     primary_part?: string;
     part: string;
     secondary_part: string | null;
+    variant?: string | null;
+    color?: string | null;
     sku: string;
     confidence: number;
+    rule_confidence?: number;
+    final_confidence?: number;
     corrections: string[] | AnalyzeTitleCorrection[];
     correction_pairs?: AnalyzeTitleCorrection[];
     interpreted_title: string;
     parser_reason: string;
     source?: "rule" | "ai" | "cache";
+    ai_used?: boolean;
     review_required?: boolean;
     needs_review?: boolean;
     decision?: string;
-    parse_status: "parsed" | "not_understandable";
+    parse_stage?: "rule_only" | "rule_normalized" | "ai_assisted";
+    validation_failed_reason?: string;
+    parse_status: "parsed" | "partial" | "not_understandable";
 }
 
 export interface TrainingAnalytics {
@@ -107,6 +114,20 @@ export interface TrainingBootstrapMeta {
     rule_count: number;
     training_example_count: number;
     normalization_dataset_loaded: boolean;
+    approved_pattern_count?: number;
+    candidate_pattern_count?: number;
+    approved_spelling_count?: number;
+    candidate_spelling_count?: number;
+    pending_pattern_review_count?: number;
+    pending_spelling_review_count?: number;
+}
+
+export interface CandidateLearningItem {
+    candidate_type: "pattern" | "spelling";
+    normalized_source: string;
+    mapped_value: string;
+    review_status: "PENDING" | "APPROVED" | "REJECTED";
+    review_note?: string;
 }
 
 export interface TrainingBootstrapResponse {
@@ -120,6 +141,10 @@ export interface TrainingBootstrapResponse {
     title_overrides: Array<{ title: string; correct_sku: string }>;
     rule_definitions: TrainingRuleDefinition[];
     learned_pattern_preview: TrainingPartMapping[];
+    candidate_learning?: {
+        patterns: CandidateLearningItem[];
+        spellings: CandidateLearningItem[];
+    };
     meta: TrainingBootstrapMeta;
 }
 
@@ -145,6 +170,6 @@ export interface TrainingLiveTestResponse {
     generated_sku: string;
     confidence: number;
     corrections: Array<{ from?: string; to?: string } | string>;
-    parse_status: "parsed" | "not_understandable";
+    parse_status: "parsed" | "partial" | "not_understandable";
     reason: string;
 }
