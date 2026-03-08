@@ -2,6 +2,7 @@
   "dataset": "global_mobile_repair_part_ontology",
   "generated_at": "2026-03-06T00:21:33Z",
   "part_code_map": {
+    "ANNTENNA FLEX": "ANTT-F",
     "ANTENNA CONNECTOR": "ANNT-CONN",
     "BACK CAMERA": "BC",
     "BACK CAMERA DEPTH": "BC-D",
@@ -12,25 +13,34 @@
     "BACK CAMERA ULTRA WIDE": "BC-UW",
     "BACK CAMERA WIDE": "BC-W",
     "BACK DOOR": "BDR",
+    "BACKDOOR BLACK": "BACKDOOR BLK",
     "BATTERY": "BATT",
+    "BUTTOM LOUD SPEAKER": "LS-B",
     "CAMERA FLEX": "CAM-F",
+    "CAMERA FRONT": "FC",
     "CHARGING FLEX": "CF",
     "CHARGING PORT": "CP",
     "CHARGING PORT WITH HEADPHONE JACK": "CP HJ",
     "EAR SPEAKER": "ES",
+    "FACE ID": "FACE-ID",
     "FINGERPRINT SENSOR": "FS",
     "FRONT CAMERA": "FC",
     "HEADPHONE JACK": "HJ",
+    "HOME BUTTON": "HB",
+    "HOME BUTTON FLEX": "HB-FC",
     "LCD FLEX": "LCD-F",
     "LOUD SPEAKER": "LS",
+    "MAIN BOARD FLEX": "MB-FC",
+    "MAIN BOARD FLEX CABLE": "MB-FC",
     "MAINBOARD FLEX": "MB-FC",
     "MICROPHONE": "MIC",
     "NFC FLEX": "NFC",
     "POWER BUTTON FLEX": "PB-F",
-    "POWER VOLUME FLEX": "PV-F",
+    "POWER VOLUME FLEX": "P/V-F",
     "PROXIMITY SENSOR": "PS",
     "SIM READER": "SR",
     "SIM TRAY": "ST",
+    "TOP LOUD SPEAKER": "LS-T",
     "VIBRATOR": "VIB",
     "VOLUME FLEX": "VOL-F",
     "WIFI ANTENNA": "WIF-ANNT"
@@ -60,6 +70,22 @@
       "fingerprint scanner",
       "fp sensor",
       "touch id"
+    ],
+    "HOME BUTTON FLEX": [
+      "home button flex",
+      "home button flex cable",
+      "home button with flex",
+      "home button fpc",
+      "home button ribbon",
+      "home button ribbon cable",
+      "home key flex",
+      "home key fpc",
+      "home key ribbon",
+      "home key ribbon cable",
+      "menu button fpc",
+      "menu button flex",
+      "menu button ribbon",
+      "menu button ribbon cable"
     ],
     "SIM TRAY": [
       "sim tray",
@@ -688,10 +714,73 @@
           "volume up button",
           "volume down button"
         ]
+      },
+      "LCD-ASSY": {
+        "label": "LCD Assembly",
+        "priority": 10,
+        "detection_phrases": [
+          "lcd assembly",
+          "lcd assy",
+          "screen assembly",
+          "display assembly",
+          "lcd with frame",
+          "lcd assembly with frame",
+          "lcd assembly without frame",
+          "lcd assembly refurbished",
+          "tft assembly",
+          "display module",
+          "lcd module",
+          "lcd assembly digitizer",
+          "lcd display assembly",
+          "lcd replacement assembly"
+        ],
+        "sku_code": "LCD-ASSY"
+      },
+      "OLED-ASSY": {
+        "label": "OLED Assembly",
+        "priority": 10,
+        "detection_phrases": [
+          "oled assembly",
+          "oled assy",
+          "oled display",
+          "amoled assembly",
+          "oled with frame",
+          "oled assembly with frame",
+          "oled assembly without frame",
+          "oled display assembly",
+          "oled module",
+          "super amoled assembly",
+          "dynamic amoled",
+          "oled screen assembly",
+          "inner oled",
+          "outer oled",
+          "main oled assembly"
+        ],
+        "sku_code": "OLED-ASSY"
+      },
+      "OLED-ASSY-F": {
+        "label": "OLED Assembly With Frame",
+        "priority": 11,
+        "detection_phrases": [
+          "oled assembly with frame",
+          "oled with frame included",
+          "oled assembly frame"
+        ],
+        "sku_code": "OLED-ASSY-F"
+      },
+      "LCD-ASSY-F": {
+        "label": "LCD Assembly With Frame",
+        "priority": 11,
+        "detection_phrases": [
+          "lcd assembly with frame",
+          "lcd with frame included",
+          "lcd assembly frame"
+        ],
+        "sku_code": "LCD-ASSY-F"
       }
     },
     "priority_resolution": "lower_number_wins",
     "default_sku_note": "When part has ambiguous detection, use highest priority matching code"
   },
-  "updated_at": "2026-03-06T19:19:26.091654+00:00"
+  "updated_at": "2026-03-07T21:39:13.405103+00:00"
 }

@@ -96,12 +96,103 @@ def test_model_prefix_rule_and_length_limit() -> None:
     assert len(sku) <= 31
 
 
+def test_long_oem_model_codes_are_not_forced_into_sku() -> None:
+    assert (
+        generate_sku("Camera Lens Bracket for Moto G71 5G XT2169-1 Neptune Green")
+        == "MOTO G71 5G BCL-B GRN"
+    )
+
+    parsed = analyze_title("Camera Lens Bracket for Moto G71 5G XT2169-1 Neptune Green")
+    assert parsed["model_code"] == "XT2169-1"
+    assert parsed["sku"] == "MOTO G71 5G BCL-B GRN"
+
+
+def test_model_code_only_used_for_conflicting_models() -> None:
+    assert generate_sku("Earpiece Speaker for Galaxy A72 A725") == "GALAXY A72 ES"
+
+    parsed = analyze_title("Earpiece Speaker for Galaxy A72 A725")
+    assert parsed["model_code"] == "A725"
+    assert parsed["sku"] == "GALAXY A72 ES"
+
+
 def test_model_detection_prefers_longest_specific_match() -> None:
     assert analyze_title("pixel 8 pro ear speaker")["model"] == "PIXEL 8 PRO"
     assert analyze_title("pixel 8 charging port")["model"] == "PIXEL 8"
     assert analyze_title("galaxy s23 ultra charging port")["model"] == "GALAXY S23 ULTRA"
     assert analyze_title("iphone 13 pro max battery")["model"] == "IPHONE 13 PRO MAX"
     assert analyze_title("redmi note 12 pro display")["model"] == "REDMI NOTE 12 PRO"
+
+
+def test_compact_iphone_model_token_keeps_full_model_for_small_parts() -> None:
+    payload = analyze_title("iphone 17promax earspeaker")
+
+    assert payload["brand"] == "APPLE"
+    assert payload["model"] == "IPHONE 17 PRO MAX"
+    assert payload["part"] == "ES"
+    assert payload["sku"] == "IPHONE 17 PRO MAX ES"
+
+
+def test_spaced_letter_brand_tokens_normalize_to_lg_model() -> None:
+    payload = analyze_title("L g K 7 loud speaker")
+
+    assert payload["brand"] == "LG"
+    assert payload["model"] == "LG K7"
+    assert payload["part"] == "LS"
+    assert payload["sku"] == "LG K7 LS"
+
+
+def test_spacing_noise_is_normalized_for_small_parts_across_brands() -> None:
+    cases = [
+        (
+            "ip hone 17 promax ear speaker",
+            "APPLE",
+            "IPHONE 17 PRO MAX",
+            "ES",
+            "IPHONE 17 PRO MAX ES",
+        ),
+        (
+            "lgk7 loud speaker",
+            "LG",
+            "LG K7",
+            "LS",
+            "LG K7 LS",
+        ),
+        (
+            "sams ung a20 loud speaker",
+            "SAMSUNG",
+            "GALAXY A20",
+            "LS",
+            "GALAXY A20 LS",
+        ),
+        (
+            "vi vo y20 ear speaker",
+            "VIVO",
+            "VIVO Y20",
+            "ES",
+            "VIVO Y20 ES",
+        ),
+        (
+            "v i v o y 2 0 ear speaker",
+            "VIVO",
+            "VIVO Y20",
+            "ES",
+            "VIVO Y20 ES",
+        ),
+        (
+            "red mi note12pro loud speaker",
+            "XIAOMI",
+            "REDMI NOTE 12 PRO",
+            "LS",
+            "REDMI NOTE 12 PRO LS",
+        ),
+    ]
+
+    for title, expected_brand, expected_model, expected_part, expected_sku in cases:
+        payload = analyze_title(title)
+        assert payload["brand"] == expected_brand
+        assert payload["model"] == expected_model
+        assert payload["part"] == expected_part
+        assert payload["sku"] == expected_sku
 
 
 def test_model_only_titles_return_partial_without_injecting_catalog_part() -> None:
@@ -120,14 +211,28 @@ def test_display_assembly_filtering_kept() -> None:
 
 
 def test_display_filter_exceptions_keep_small_parts() -> None:
-    for title in (
-        "Galaxy A52 LCD FPC Connector",
-        "Galaxy A52 Display Connector Flex",
-        "Galaxy A52 Touch Connector Flex",
-    ):
-        sku = generate_sku(title)
-        assert sku != NOT_UNDERSTANDABLE
-        assert "FPC" in sku.split()
+    assert generate_sku("Galaxy A52 LCD FPC Connector") == "GALAXY A52 LCD-FPC"
+    assert generate_sku("Galaxy A52 Display Connector Flex") == "GALAXY A52 LCD-FPC"
+    assert generate_sku("Galaxy A52 Touch Connector Flex") == "GALAXY A52 DIG-FPC"
+
+
+def test_specific_fpc_connector_rules() -> None:
+    assert (
+        generate_sku("Galaxy A52 Mainboard FPC Connector")
+        == "GALAXY A52 MFC-FPC"
+    )
+    assert (
+        generate_sku("Galaxy A52 Motherboard LCD FPC Connector")
+        == "GALAXY A52 MFC-FPC"
+    )
+    assert (
+        generate_sku("Galaxy A52 LCD / Digitizer FPC Connector")
+        == "GALAXY A52 LCD-DIG-FPC"
+    )
+    assert (
+        generate_sku("Galaxy A52 LCD FPC Connector 48 Pin")
+        == "GALAXY A52 LCD-FPC 48PIN"
+    )
 
 
 def test_semantic_detection_uses_standardized_codes() -> None:
@@ -258,7 +363,7 @@ def test_home_button_analysis_does_not_duplicate_flex_terms() -> None:
 
 
 def test_backdoor_without_space_and_head_phone_jack_normalize_correctly() -> None:
-    assert generate_sku("BackDoor for Samsung Galaxy Note 4 Charcoal Black") == "GALAXY NOTE 4 BDR BCL BLK"
+    assert generate_sku("BackDoor for Samsung Galaxy Note 4 Charcoal Black") == "GALAXY NOTE 4 BDR BLK"
     assert generate_sku("Head Phone Jack Black for Samsung Galaxy Note 9") == "GALAXY NOTE 9 HJ"
 
 
@@ -288,14 +393,14 @@ def test_lcd_frame_adhesive_does_not_duplicate_lcd_code_from_hint() -> None:
     assert parsed["secondary_part"] == ""
 
 
-def test_backdoor_rule_includes_bcl_and_color() -> None:
+def test_backdoor_rule_only_includes_bcl_when_lens_is_detected() -> None:
     assert (
         generate_sku("Galaxy A35 5G A356 Back Door White")
-        == "GALAXY A35 5G A356 BDR BCL WHT"
+        == "GALAXY A35 5G A356 BDR WHT"
     )
     assert (
         generate_sku("Galaxy A35 5G A356 Back Door Black")
-        == "GALAXY A35 5G A356 BDR BCL BLK"
+        == "GALAXY A35 5G A356 BDR BLK"
     )
     assert (
         generate_sku("Galaxy A36 5G A366 Back Door with steel plate and camera lens Black")
@@ -303,11 +408,30 @@ def test_backdoor_rule_includes_bcl_and_color() -> None:
     )
 
 
+def test_backdoor_analysis_without_lens_keeps_secondary_part_empty() -> None:
+    parsed = analyze_title("back door samsung note 20 ultra")
+
+    assert parsed["model"] == "GALAXY NOTE 20 ULTRA"
+    assert parsed["part"] == "BDR"
+    assert parsed["secondary_part"] == ""
+    assert parsed["sku"] == "GALAXY NOTE 20 ULTRA BDR"
+
+
 def test_fingerprint_sensor_color_suffix() -> None:
     assert (
         generate_sku("Fingerprint Sensor for Galaxy A05S A057 Blue")
         == "GALAXY A05S A057 FS BLU"
     )
+
+
+def test_generic_fingerprint_aliases_canonicalize_to_fs() -> None:
+    assert generate_sku("FINGER SENSOR PIXEL 6 PRO BLACK") == "PIXEL 6 PRO FS BLACK"
+    assert generate_sku("Fingerprint Reader for Pixel 6 Pro Black") == "PIXEL 6 PRO FS BLACK"
+
+    parsed = analyze_title("FINGER SENSOR PIXEL 6 PRO BLACK")
+    assert parsed["part"] == "FS"
+    assert parsed["color"] == "BLACK"
+    assert parsed["sku"] == "PIXEL 6 PRO FS BLACK"
 
 
 def test_dual_single_sim_tray_color_mapping() -> None:
@@ -339,47 +463,47 @@ def test_wireless_nfc_flex_and_bracket_rule() -> None:
 def test_inventory_correction_rules_for_new_part_codes() -> None:
     assert (
         generate_sku("Galaxy A90 5G A908 Battery FPC Connector (8 Pin)")
-        == "GALAXY A90 5G A908 BAT FPC"
+        == "GALAXY A90 5G BAT FPC 8PIN"
     )
     assert (
         generate_sku("Galaxy A90 5G A908 Battery Connector")
-        == "GALAXY A90 5G A908 BAT FPC"
+        == "GALAXY A90 5G BAT FPC"
     )
     assert (
         generate_sku("Galaxy A90 5G A908 Antenna Connecting Cable")
-        == "GALAXY A90 5G A908 ANNT-CONN"
+        == "GALAXY A90 5G ANNT-CONN"
     )
     assert (
         generate_sku("Galaxy A90 5G A908 Antenna Flex")
-        == "GALAXY A90 5G A908 ANNT-CONN"
+        == "GALAXY A90 5G ANNT-CONN"
     )
     assert (
         generate_sku("Galaxy A90 5G A908 Sim Card Reader")
-        == "GALAXY A90 5G A908 SR"
+        == "GALAXY A90 5G SR"
     )
     assert (
         generate_sku("Galaxy A80 A805 Vibrator & Earpiece Speaker")
-        == "GALAXY A80 A805 V/ES"
+        == "GALAXY A80 V/ES"
     )
     assert (
         generate_sku("Galaxy A80 A805 Pop-Up Camera Motor")
-        == "GALAXY A80 A805 LIFT-MOT"
+        == "GALAXY A80 LIFT-MOT"
     )
     assert (
         generate_sku("Galaxy A90 5G A908 Motherboard Flex")
-        == "GALAXY A90 5G A908 MB-FC"
+        == "GALAXY A90 5G MB-FC"
     )
     assert (
         generate_sku("Galaxy A90 5G A908 Camera Flex Cable")
-        == "GALAXY A90 5G A908 CAM-F"
+        == "GALAXY A90 5G CAM-F"
     )
     assert (
         generate_sku("Galaxy A90 5G A908 Mic Flex")
-        == "GALAXY A90 5G A908 MIC-FC"
+        == "GALAXY A90 5G MIC-FC"
     )
     assert (
         generate_sku("Galaxy A90 5G A908 LCD Flex")
-        == "GALAXY A90 5G A908 LCD-F"
+        == "GALAXY A90 5G LCD-F"
     )
 
 
@@ -476,8 +600,8 @@ def test_process_inventory_duplicate_resolution_uses_attributes(tmp_path: Path) 
     df.to_excel(input_path, index=False)
 
     result = process_inventory(input_path, output_path)
-    assert result.loc[0, "Product New SKU"] == "GALAXY A35 5G A356 BDR BCL WHT"
-    assert result.loc[1, "Product New SKU"] == "GALAXY A35 5G A356 BDR BCL BLK"
+    assert result.loc[0, "Product New SKU"] == "GALAXY A35 5G A356 BDR WHT"
+    assert result.loc[1, "Product New SKU"] == "GALAXY A35 5G A356 BDR BLK"
     assert result.loc[2, "Product New SKU"] == "GALAXY A16 5G A166 CP"
     assert result.loc[3, "Product New SKU"] == "GALAXY A16 5G A166 CP INT"
     assert result["SKU Duplicate"].eq("DUPLICATED").sum() == 0

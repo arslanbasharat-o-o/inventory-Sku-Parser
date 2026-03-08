@@ -154,7 +154,7 @@ class StructuredSKUParserService:
         review_threshold: float = 0.75,
         rule_accept_threshold: float = 0.80,
         cache_size: int = 50_000,
-        db_path: str | Path = "outputs/structured_sku_results.db",
+        db_path: str | Path = "data/runtime/structured_sku_results.db",
         enable_ai: bool = True,
     ) -> None:
         self.ai_threshold = float(ai_threshold)

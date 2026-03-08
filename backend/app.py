@@ -50,14 +50,14 @@ def create_app() -> Flask:
     UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     training_service = TrainingDashboardService(
-        structured_log_db_path=Path(os.getenv("SKU_PARSE_DB_PATH", "outputs/structured_sku_results.db"))
+        structured_log_db_path=Path(os.getenv("SKU_PARSE_DB_PATH", "data/runtime/structured_sku_results.db"))
     )
     structured_parser_service = StructuredSKUParserService(
         ai_threshold=AI_THRESHOLD,
         review_threshold=REVIEW_THRESHOLD,
         rule_accept_threshold=RULE_ACCEPT_THRESHOLD,
         cache_size=int(os.getenv("SKU_PARSE_CACHE_SIZE", "50000")),
-        db_path=os.getenv("SKU_PARSE_DB_PATH", "outputs/structured_sku_results.db"),
+        db_path=os.getenv("SKU_PARSE_DB_PATH", "data/runtime/structured_sku_results.db"),
         enable_ai=True,
     )
 

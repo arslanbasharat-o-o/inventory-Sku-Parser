@@ -22,6 +22,10 @@ const nextConfig: NextConfig = {
         destination: `${backendBaseUrl}/parse-inventory-api`,
       },
       {
+        source: "/parse-inventory-api/:path*",
+        destination: `${backendBaseUrl}/parse-inventory-api/:path*`,
+      },
+      {
         source: "/generate-sku-api",
         destination: `${backendBaseUrl}/generate-sku-api`,
       },

@@ -76,6 +76,7 @@ BACKDOOR_PATTERNS_FILE = CORE_DATA_DIR / "backdoor_patterns.json"
 BRAND_DATASET_FILE = CORE_DATA_DIR / "brand_dataset.json"
 PART_ONTOLOGY_DATASET_FILE = CORE_DATA_DIR / "part_ontology.json"
 DEVICE_MODEL_DATABASE_FILE = CORE_DATA_DIR / "device_model_database.json"
+PHONEDB_MODELS_FILE = PROJECT_ROOT_DIR / "phonedb_models.json"
 
 LEARNED_TITLE_PATTERNS_FILE = RUNTIME_DATA_DIR / "learned_title_patterns.json"
 LEARNED_PARTS_FILE = RUNTIME_DATA_DIR / "learned_parts.json"
@@ -88,11 +89,13 @@ APPROVED_LEARNED_SPELLING_VARIATIONS_FILE = RUNTIME_DATA_DIR / "approved_learned
 LEARNED_SKU_CORRECTIONS_FILE = RUNTIME_DATA_DIR / "learned_sku_corrections.json"
 TX_PARTS_CATALOG_OVERLAY_FILE = RUNTIME_DATA_DIR / "tx_parts_catalog_overlay.json"
 TX_PARTS_TITLE_MEMORY_FILE = RUNTIME_DATA_DIR / "tx_parts_title_memory.json"
+PHONEDB_MODEL_OVERLAY_FILE = RUNTIME_DATA_DIR / "phonedb_model_overlay.json"
 
 # Parts whose SKU includes color as a suffix to avoid duplicates
 COLOR_BEARING_PARTS = {"FS", "ST", "STD", "BDR", "BACK DOOR", "BACKDOOR", "BCL", "HB-FC"}
 SKU_VARIANT_TOKENS = {"BRKT", "INT", "FRAME", "ADH", "MESH"}
 BRACKET_KEYWORDS = {"bracket", "holder", "mount"}
+BRACKET_ENCODED_PART_CODES = {"BCL-B", "CAM-L-B"}
 
 DEFAULT_COLOR_CODE_MAP = {
     "BLACK": "BLK",
@@ -138,6 +141,8 @@ READABLE_COLOR_FIT_TOKENS = {
     "HAZEL",
     "CHARCOAL",
 }
+
+RE_COMPACT_SKU_MODEL_CODE = re.compile(r"^(?:[A-Z]{1,3}\d{2,5}[A-Z]?|\d{3,5}[A-Z]?)$")
 
 REQUIRED_INPUT_COLUMNS = ("Product Name", "Product SKU", "Product Web SKU")
 
@@ -332,6 +337,13 @@ MODEL_SUFFIX_TOKENS = {
     "neo",
     "gt",
 }
+COMPACT_MODEL_SUFFIX_SEGMENTS = tuple(
+    sorted(
+        MODEL_SUFFIX_TOKENS | {"edge", "fold", "flip"},
+        key=len,
+        reverse=True,
+    )
+)
 
 MODEL_SPECIFICITY_TOKENS = {
     "pro",
@@ -996,6 +1008,7 @@ RE_ALPHA_NUM_TOKEN = re.compile(r"[A-Za-z0-9]+")
 RE_WITHOUT_FRAME = re.compile(r"\b(without|no)\s+frame\b")
 RE_WITH_FRAME = re.compile(r"\bwith\s+frame\b")
 RE_MULTIPACK = re.compile(r"\b(\d+)\s*(pk|pcs?|pack)\b|\bpack\s*of\s*(\d+)\b", re.IGNORECASE)
+RE_PIN_COUNT = re.compile(r"\b(\d{1,3})\s*[- ]?\s*pins?\b", re.IGNORECASE)
 RE_MODEL_LABEL_PARENS = re.compile(r"\([^)]*\)")
 RE_MODEL_YEAR = re.compile(r"\b20\d{2}\b")
 
@@ -1049,6 +1062,8 @@ class EngineConfig:
     learned_sku_corrections_file: Path = LEARNED_SKU_CORRECTIONS_FILE
     catalog_training_file: Path = TX_PARTS_CATALOG_OVERLAY_FILE
     title_training_file: Path = TX_PARTS_TITLE_MEMORY_FILE
+    phonedb_models_file: Path = PHONEDB_MODELS_FILE
+    phonedb_overlay_file: Path = PHONEDB_MODEL_OVERLAY_FILE
     enable_candidate_learned_patterns: bool = False
     enable_candidate_spelling_variations: bool = False
     max_sku_length: int = MAX_SKU_LENGTH
@@ -1209,7 +1224,9 @@ class SKUIntelligenceEngine:
         self._component_vocab_list = tuple(sorted(self._component_vocab))
         self._soundex_index: dict[str, tuple[str, ...]] = {}
         self._metaphone_index: dict[str, tuple[str, ...]] = {}
+        self._phrase_correction_items: tuple[tuple[str, str, re.Pattern[str], float], ...] = ()
         self._rebuild_phonetic_indexes()
+        self._rebuild_phrase_correction_items()
         self._unknown_pattern_counter: dict[tuple[str, str], int] = {}
         self.vector_matcher = VectorMatcher(
             model_name=self.config.vector_model_name,
@@ -1431,9 +1448,11 @@ class SKUIntelligenceEngine:
         self._component_vocab = self._build_component_vocabulary()
         self._component_vocab_list = tuple(sorted(self._component_vocab))
         self._rebuild_phonetic_indexes()
+        self._rebuild_phrase_correction_items()
         self._rebuild_vector_index()
         self.sku_overrides, self.title_sku_overrides = self._load_sku_corrections()
         self._correct_token_cached.cache_clear()
+        self._normalize_with_token_corrections_scored_cached.cache_clear()
         self._parse_cached.cache_clear()
 
     def _canonicalize_part_code(self, code: str) -> str:
@@ -1866,35 +1885,42 @@ class SKUIntelligenceEngine:
                 candidates.update(self._metaphone_index.get(key, ()))
         return tuple(sorted(candidates))
 
+    def _rebuild_phrase_correction_items(self) -> None:
+        items: list[tuple[str, str, re.Pattern[str], float]] = []
+        for typo, canonical in sorted(self.spelling_corrections.items(), key=lambda item: len(item[0]), reverse=True):
+            if " " not in typo:
+                continue
+            pattern_text = rf"\b{re.escape(typo)}\b"
+            if canonical.startswith(f"{typo} "):
+                suffix = canonical[len(typo) :].strip()
+                if suffix:
+                    pattern_text = rf"\b{re.escape(typo)}\b(?!\s+{re.escape(suffix)}\b)"
+            items.append(
+                (
+                    typo,
+                    canonical,
+                    re.compile(pattern_text),
+                    0.99 if self._is_benign_phrase_normalization(typo, canonical) else 0.92,
+                )
+            )
+        self._phrase_correction_items = tuple(items)
+
     def _apply_phrase_corrections(
         self,
         normalized_title: str,
     ) -> tuple[str, float, tuple[tuple[str, str], ...]]:
         if not normalized_title:
             return normalized_title, 1.0, ()
-        phrase_map = {
-            typo: canonical
-            for typo, canonical in self.spelling_corrections.items()
-            if " " in typo
-        }
-        if not phrase_map:
+        if not self._phrase_correction_items:
             return normalized_title, 1.0, ()
 
         corrected = normalized_title
         confidence = 1.0
         corrections: list[tuple[str, str]] = []
-        for typo, canonical in sorted(phrase_map.items(), key=lambda item: len(item[0]), reverse=True):
-            pattern = rf"\b{re.escape(typo)}\b"
-            if canonical.startswith(f"{typo} "):
-                suffix = canonical[len(typo) :].strip()
-                if suffix:
-                    pattern = rf"\b{re.escape(typo)}\b(?!\s+{re.escape(suffix)}\b)"
-            if re.search(pattern, corrected):
-                corrected = re.sub(pattern, canonical, corrected)
-                confidence = min(
-                    confidence,
-                    0.99 if self._is_benign_phrase_normalization(typo, canonical) else 0.92,
-                )
+        for typo, canonical, pattern, correction_confidence in self._phrase_correction_items:
+            if pattern.search(corrected):
+                corrected = pattern.sub(canonical, corrected)
+                confidence = min(confidence, correction_confidence)
                 corrections.append((typo, canonical))
         corrected = RE_MULTI_SPACE.sub(" ", corrected).strip()
         return corrected, confidence, tuple(corrections)
@@ -1996,6 +2022,22 @@ class SKUIntelligenceEngine:
         return corrected
 
     def _normalize_with_token_corrections_scored(
+        self,
+        normalized_title: str,
+        learn: bool = False,
+    ) -> tuple[str, float, str, tuple[tuple[str, str], ...]]:
+        if not learn:
+            return self._normalize_with_token_corrections_scored_cached(normalized_title)
+        return self._normalize_with_token_corrections_scored_uncached(normalized_title, learn=learn)
+
+    @lru_cache(maxsize=50_000)
+    def _normalize_with_token_corrections_scored_cached(
+        self,
+        normalized_title: str,
+    ) -> tuple[str, float, str, tuple[tuple[str, str], ...]]:
+        return self._normalize_with_token_corrections_scored_uncached(normalized_title, learn=False)
+
+    def _normalize_with_token_corrections_scored_uncached(
         self,
         normalized_title: str,
         learn: bool = False,
@@ -2106,6 +2148,152 @@ class SKUIntelligenceEngine:
                 continue
             cleaned.append(token)
         return " ".join(cleaned).strip() or normalized_title
+
+    @staticmethod
+    def _split_compact_model_suffix_token(token: str) -> list[str]:
+        compact = str(token or "").lower().strip()
+        if not compact:
+            return []
+
+        for pattern in (
+            r"(?P<prefix>[a-z]?\d{1,4})(?P<suffix>[a-z]{2,16})",
+            r"(?P<prefix>[a-z]{2,12}\d{1,4})(?P<suffix>[a-z]{2,16})",
+        ):
+            match = re.fullmatch(pattern, compact)
+            if not match:
+                continue
+
+            prefix = match.group("prefix")
+            remainder = match.group("suffix")
+            suffixes: list[str] = []
+            while remainder:
+                matched = ""
+                for candidate in COMPACT_MODEL_SUFFIX_SEGMENTS:
+                    if remainder.startswith(candidate):
+                        matched = candidate
+                        break
+                if not matched:
+                    suffixes = []
+                    break
+                suffixes.append(matched)
+                remainder = remainder[len(matched) :]
+
+            if suffixes:
+                return [prefix, *suffixes]
+        return [compact]
+
+    def _split_compact_brand_model_token(self, token: str) -> list[str]:
+        compact = str(token or "").lower().strip()
+        if not compact or not any(ch.isdigit() for ch in compact):
+            return [compact]
+
+        brand_aliases = sorted(
+            {str(alias).lower() for alias in BRAND_FAMILY_MAP if str(alias).strip()},
+            key=len,
+            reverse=True,
+        )
+        for alias in brand_aliases:
+            if len(alias) < 2:
+                continue
+            if not compact.startswith(alias) or len(compact) <= len(alias):
+                continue
+            remainder = compact[len(alias) :]
+            if remainder and any(ch.isdigit() for ch in remainder):
+                return [alias, remainder]
+        return [compact]
+
+    def _merge_spaced_brand_tokens(self, tokens: list[str]) -> list[str]:
+        if not tokens:
+            return []
+
+        known_brands = {str(alias).lower() for alias in BRAND_FAMILY_MAP if str(alias).strip()}
+        merged: list[str] = []
+        idx = 0
+        while idx < len(tokens):
+            matched = ""
+            max_window = min(6, len(tokens) - idx)
+            for window_size in range(max_window, 1, -1):
+                chunk = tokens[idx : idx + window_size]
+                if not chunk:
+                    continue
+                if any(not token or len(token) > 6 for token in chunk):
+                    continue
+                candidate = "".join(chunk)
+                if candidate in known_brands:
+                    matched = candidate
+                    idx += window_size
+                    break
+            if matched:
+                merged.append(matched)
+                continue
+            merged.append(tokens[idx])
+            idx += 1
+        return merged
+
+    def _merge_split_model_tokens(self, tokens: list[str]) -> list[str]:
+        if not tokens:
+            return []
+
+        merged: list[str] = []
+        idx = 0
+        while idx < len(tokens):
+            current = tokens[idx]
+            if (
+                re.fullmatch(r"[a-z]{1,4}", current)
+                and current not in GENERIC_NOISE
+                and current not in MODEL_STOPWORDS
+                and current not in BRAND_FAMILY_MAP
+            ):
+                lookahead = idx + 1
+                digit_tokens: list[str] = []
+                while (
+                    lookahead < len(tokens)
+                    and re.fullmatch(r"\d{1,2}", tokens[lookahead])
+                    and len("".join(digit_tokens) + tokens[lookahead]) <= 4
+                ):
+                    digit_tokens.append(tokens[lookahead])
+                    lookahead += 1
+                if digit_tokens:
+                    collapsed = f"{current}{''.join(digit_tokens)}"
+                    if lookahead < len(tokens) and re.fullmatch(r"[a-z]", tokens[lookahead]):
+                        collapsed = f"{collapsed}{tokens[lookahead]}"
+                        lookahead += 1
+                    merged.append(collapsed)
+                    idx = lookahead
+                    continue
+            if (
+                re.fullmatch(r"[a-z]\d{1,4}", current)
+                and idx + 1 < len(tokens)
+                and re.fullmatch(r"[a-z]", tokens[idx + 1])
+            ):
+                merged.append(f"{current}{tokens[idx + 1]}")
+                idx += 2
+                continue
+            merged.append(current)
+            idx += 1
+        return merged
+
+    def _normalize_compact_model_tokens(self, normalized_title: str) -> str:
+        if not normalized_title:
+            return ""
+
+        tokens = self.tokenize(normalized_title)
+        if not tokens:
+            return normalized_title
+
+        expanded_tokens: list[str] = []
+        for token in tokens:
+            expanded_tokens.extend(self._split_compact_brand_model_token(token))
+
+        collapsed_brand_tokens = self._merge_spaced_brand_tokens(expanded_tokens)
+        collapsed_model_tokens = self._merge_split_model_tokens(collapsed_brand_tokens)
+
+        normalized_tokens: list[str] = []
+        for token in collapsed_model_tokens:
+            normalized_tokens.extend(self._split_compact_model_suffix_token(token))
+
+        normalized = " ".join(token for token in normalized_tokens if token).strip()
+        return normalized or normalized_title
 
     @staticmethod
     def _parse_pixel_model_entry(segment: str) -> str:
@@ -2245,6 +2433,13 @@ class SKUIntelligenceEngine:
                 if len(model_tokens) >= 4:
                     break
                 continue
+            alnum_match = re.fullmatch(r"(?P<prefix>[a-z]{3,10})(?P<digits>\d{1,4}[a-z]?)", token)
+            if alnum_match:
+                model_tokens.append(alnum_match.group("prefix"))
+                model_tokens.append(alnum_match.group("digits"))
+                if len(model_tokens) >= 4:
+                    break
+                continue
             if re.fullmatch(r"[a-z]{1,6}", token):
                 model_tokens.append(token)
                 if len(model_tokens) >= 4:
@@ -2377,6 +2572,18 @@ class SKUIntelligenceEngine:
 
         return " ".join(out[:3])
 
+    def _detect_pin_variant(self, normalized_title: str, part_code: str) -> str:
+        normalized_part = self.normalize_code(part_code)
+        if "FPC" not in normalized_part:
+            return ""
+        match = RE_PIN_COUNT.search(normalized_title)
+        if not match:
+            return ""
+        pin_count = match.group(1)
+        if not pin_count:
+            return ""
+        return f"{int(pin_count)}PIN"
+
     def _detect_frame_variant(self, normalized_title: str) -> bool:
         padded = f" {normalized_title} "
         if RE_WITH_FRAME.search(normalized_title) or RE_WITHOUT_FRAME.search(normalized_title):
@@ -2501,6 +2708,15 @@ class SKUIntelligenceEngine:
                         self.spelling_corrections[src_norm] = dst_norm
         except Exception:
             pass
+        # Keep a small set of safe built-in phrase normalizations in code so
+        # generic fingerprint titles do not depend on noisy learned datasets.
+        for src, dst in {
+            "finger sensor": "fingerprint sensor",
+        }.items():
+            src_norm = self.normalize_phrase(src)
+            dst_norm = self.normalize_phrase(dst)
+            if src_norm and dst_norm and src_norm != dst_norm:
+                self.spelling_corrections[src_norm] = dst_norm
 
     def _load_backdoor_patterns(self) -> None:
         """Load back door detection patterns and camera lens suffix rules."""
@@ -2663,6 +2879,7 @@ class SKUIntelligenceEngine:
         self._device_model_exact = {}
         self._device_model_alias_index = {}
         self._device_model_max_tokens = 0
+        self._sku_models_requiring_code: set[tuple[str, str]] = set()
 
         try:
             data = json.loads(DEVICE_MODEL_DATABASE_FILE.read_text(encoding="utf-8"))
@@ -2677,6 +2894,7 @@ class SKUIntelligenceEngine:
         exact: dict[str, list[tuple[str, str, tuple[str, ...], int, int]]] = {}
         alias_index: dict[str, set[str]] = {}
         seen_keys: set[tuple[str, str, str, tuple[str, ...]]] = set()
+        model_code_index: defaultdict[tuple[str, str], set[str]] = defaultdict(set)
 
         for row in models:
             self._register_device_model_row(
@@ -2684,6 +2902,7 @@ class SKUIntelligenceEngine:
                 exact=exact,
                 alias_index=alias_index,
                 seen_keys=seen_keys,
+                model_code_index=model_code_index,
             )
 
         overlay = self._load_catalog_training_overlay()
@@ -2693,6 +2912,16 @@ class SKUIntelligenceEngine:
                 exact=exact,
                 alias_index=alias_index,
                 seen_keys=seen_keys,
+                model_code_index=model_code_index,
+            )
+
+        for row in self._load_phonedb_overlay():
+            self._register_device_model_row(
+                row=row,
+                exact=exact,
+                alias_index=alias_index,
+                seen_keys=seen_keys,
+                model_code_index=model_code_index,
             )
 
         for alias, entries in exact.items():
@@ -2711,6 +2940,9 @@ class SKUIntelligenceEngine:
             token: tuple(sorted(values, key=len, reverse=True))
             for token, values in alias_index.items()
         }
+        self._sku_models_requiring_code = {
+            key for key, codes in model_code_index.items() if len(codes) > 1
+        }
 
     def _load_catalog_training_overlay(self) -> dict[str, object]:
         try:
@@ -2720,6 +2952,84 @@ class SKUIntelligenceEngine:
         if not isinstance(data, dict):
             return {}
         return data
+
+    def _load_phonedb_overlay(self) -> list[dict[str, object]]:
+        for source_path in (self.config.phonedb_overlay_file, self.config.phonedb_models_file):
+            try:
+                data = json.loads(source_path.read_text(encoding="utf-8"))
+            except Exception:
+                continue
+            if not isinstance(data, dict):
+                continue
+            rows = data.get("models", [])
+            if not isinstance(rows, list):
+                continue
+
+            overlay_rows: list[dict[str, object]] = []
+            for row in rows:
+                if not isinstance(row, dict):
+                    continue
+
+                dataset_brand = str(row.get("brand", "")).replace("\xa0", " ").strip()
+                model_raw = str(row.get("model", "")).replace("\xa0", " ").strip()
+                model_codes = [
+                    self.normalize_code(code)
+                    for code in row.get("model_codes", [])
+                    if self.normalize_code(str(code))
+                ]
+                aliases = [
+                    str(alias).replace("\xa0", " ").strip()
+                    for alias in row.get("aliases", [])
+                    if str(alias).strip()
+                ]
+                source_label = str(row.get("source", "phonedb_overlay")).strip() or "phonedb_overlay"
+
+                if not dataset_brand or not model_raw:
+                    raw_name = str(row.get("name", "")).replace("\xa0", " ").strip()
+                    if not raw_name or len(raw_name) < 3:
+                        continue
+                    parts = raw_name.split()
+                    if len(parts) < 2:
+                        continue
+                    dataset_brand = parts[0]
+                    model_raw = " ".join(parts[1:]).strip()
+                    if not aliases:
+                        aliases = [raw_name]
+
+                if not dataset_brand or not model_raw:
+                    continue
+
+                sku_brand = self._sku_brand_from_dataset_brand(dataset_brand)
+                if not sku_brand:
+                    continue
+                if FILTER_MODEL_DATASET_TO_CORE_BRANDS and sku_brand not in CORE_SMARTPHONE_BRANDS:
+                    continue
+
+                normalized_model = self._normalize_model_for_sku(
+                    sku_brand,
+                    dataset_brand,
+                    model_raw,
+                    model_codes,
+                )
+                if not normalized_model or not self._is_viable_canonical_model(sku_brand, normalized_model):
+                    continue
+
+                if not aliases:
+                    aliases = [f"{dataset_brand} {model_raw}".strip(), model_raw]
+                overlay_rows.append(
+                    {
+                        "brand": dataset_brand,
+                        "model": model_raw,
+                        "model_codes": model_codes,
+                        "aliases": aliases,
+                        "source": source_label,
+                    }
+                )
+
+            if overlay_rows:
+                return overlay_rows
+
+        return []
 
     def _load_title_training_memory(self) -> None:
         self._trained_title_memory = {}
@@ -2804,7 +3114,7 @@ class SKUIntelligenceEngine:
         )
         if part_code:
             return True
-        if self._is_fpc_connector_context(normalized_title):
+        if self._resolve_fpc_connector_context(normalized_title):
             return True
         fallback_code, _fallback_reason, _fallback_confidence = self._generic_component_fallback(
             normalized_title
@@ -2889,6 +3199,7 @@ class SKUIntelligenceEngine:
         exact: dict[str, list[tuple[str, str, tuple[str, ...], int, int]]],
         alias_index: dict[str, set[str]],
         seen_keys: set[tuple[str, str, str, tuple[str, ...]]],
+        model_code_index: defaultdict[tuple[str, str], set[str]],
     ) -> None:
         if not isinstance(row, dict):
             return
@@ -2918,6 +3229,14 @@ class SKUIntelligenceEngine:
         )
         if not sku_brand or not model_for_sku or not self._is_viable_canonical_model(sku_brand, model_for_sku):
             return
+
+        compact_codes = {
+            code
+            for code in model_codes
+            if code and not any(separator in code for separator in ("-", "/", " "))
+        }
+        if compact_codes:
+            model_code_index[(sku_brand, model_for_sku)].update(compact_codes)
 
         aliases: set[str] = {str(model_raw), f"{sku_brand} {model_for_sku}".strip(), model_for_sku}
         aliases.update(str(alias) for alias in row.get("aliases", []) if str(alias).strip())
@@ -3006,6 +3325,13 @@ class SKUIntelligenceEngine:
                 if not entries:
                     continue
                 best_brand, best_model, best_codes, _matched_tokens, _model_size = entries[0]
+                if (
+                    title_core_digit_tokens
+                    and self.normalize_code(best_brand)
+                    and self.normalize_code(best_model) == self.normalize_code(best_brand)
+                ):
+                    # Avoid generic brand-only model aliases when the title clearly has model digits.
+                    continue
                 best_code = best_codes[0] if best_codes else ""
                 return best_brand, best_model, best_code
 
@@ -3060,6 +3386,12 @@ class SKUIntelligenceEngine:
                     if not entries:
                         continue
                     for brand, model, model_codes, _matched_tokens, _model_size in entries:
+                        if (
+                            title_core_digit_tokens
+                            and self.normalize_code(brand)
+                            and self.normalize_code(model) == self.normalize_code(brand)
+                        ):
+                            continue
                         weighted = float(score) + (len(model) * 0.03)
                         if weighted > best_weighted:
                             best_weighted = weighted
@@ -3175,7 +3507,9 @@ class SKUIntelligenceEngine:
         )
         if self.config.enable_candidate_spelling_variations:
             self.spelling_corrections[typo] = canonical
+            self._rebuild_phrase_correction_items()
             self._correct_token_cached.cache_clear()
+            self._normalize_with_token_corrections_scored_cached.cache_clear()
             self._parse_cached.cache_clear()
 
     def _layer3_fuzzy_interpreter(self, normalized_title: str) -> tuple[str, str, float]:
@@ -3393,12 +3727,27 @@ class SKUIntelligenceEngine:
 
         if (
             " lcd fpc connector " in padded
+            or " lcd display fpc connector " in padded
             or " display connector flex " in padded
+            or " screen connector flex " in padded
             or " touch connector flex " in padded
+            or " digitizer fpc connector " in padded
+            or " digitizer fpc connector on motherboard " in padded
+            or " lcd / digitizer fpc connector " in padded
+            or " lcd digitizer fpc connector " in padded
+            or " mainboard fpc connector " in padded
+            or " mainboard flex fpc connector " in padded
+            or " main fpc connector " in padded
+            or " motherboard lcd fpc connector " in padded
+            or " mainboard lcd fpc connector " in padded
             or " fpc connector " in padded
         ):
             pos = corrected_title.find("connector")
-            self._add_detected_code(detected, "FPC", "combo_rule", pos)
+            if pos < 0:
+                pos = corrected_title.find("fpc")
+            fpc_code = self._resolve_fpc_connector_context(corrected_title)
+            if fpc_code:
+                self._add_detected_code(detected, fpc_code, "combo_rule", pos)
             detected.pop("CP", None)
 
         if (
@@ -3859,6 +4208,15 @@ class SKUIntelligenceEngine:
     ) -> str:
         model_component = " ".join(token for token in (brand, model) if token).strip()
         normalized_model_code = self.normalize_code(model_code)
+        if not self._should_include_model_code_in_sku(
+            brand=brand,
+            model=model,
+            model_code=normalized_model_code,
+            part_code=part_code,
+            variant=variant,
+            color=color,
+        ):
+            normalized_model_code = ""
         part_tokens = self.normalize_code(part_code).split()
         if not part_tokens:
             return NOT_UNDERSTANDABLE
@@ -3868,7 +4226,7 @@ class SKUIntelligenceEngine:
         variant_tokens = [
             token
             for token in self.normalize_code(variant).split()
-            if token in SKU_VARIANT_TOKENS or token.endswith("PK")
+            if token in SKU_VARIANT_TOKENS or token.endswith("PK") or re.fullmatch(r"\d{1,3}PIN", token)
         ]
         prefers_color = bool(color) and self._part_needs_color_suffix(part_code)
         color_candidates = self._color_fit_candidates(color) if prefers_color else []
@@ -3989,6 +4347,28 @@ class SKUIntelligenceEngine:
             return mandatory_candidate
         return NOT_UNDERSTANDABLE
 
+    def _should_include_model_code_in_sku(
+        self,
+        *,
+        brand: str,
+        model: str,
+        model_code: str,
+        part_code: str,
+        variant: str,
+        color: str,
+    ) -> bool:
+        del part_code, variant, color
+        code = self.normalize_code(model_code)
+        if not code:
+            return False
+        brand_code = self.normalize_code(brand)
+        model_code_key = self.normalize_code(model)
+        if (brand_code, model_code_key) not in getattr(self, "_sku_models_requiring_code", set()):
+            return False
+        if any(separator in code for separator in ("-", "/", " ")):
+            return False
+        return bool(RE_COMPACT_SKU_MODEL_CODE.fullmatch(code))
+
     def _build_bulk_limited_sku(
         self,
         brand: str,
@@ -4067,22 +4447,89 @@ class SKUIntelligenceEngine:
                 return True
         return False
 
-    def _is_fpc_connector_context(self, normalized_title: str) -> bool:
+    def _resolve_fpc_connector_context(self, normalized_title: str) -> str:
         padded = f" {normalized_title} "
         if (
             " battery fpc connector " in padded
             or " battery flex connector " in padded
             or " battery connector " in padded
         ):
-            return False
-        return (
+            return self._lookup_ontology_code(
+                (
+                    "battery fpc connector",
+                    "battery flex connector",
+                    "battery connector",
+                ),
+                fallback="BAT FPC",
+            )
+        if (
+            " lcd / digitizer fpc connector " in padded
+            or " lcd digitizer fpc connector " in padded
+            or " fpc display & touch fpc on board " in padded
+            or " screen screen fpc connector " in padded
+        ):
+            return self._lookup_ontology_code(
+                (
+                    "lcd / digitizer fpc connector",
+                    "fpc display & touch fpc on board",
+                ),
+                fallback="LCD-DIG-FPC",
+            )
+        if (
+            " digitizer fpc connector on motherboard " in padded
+            or " digitizer fpc connector " in padded
+            or " touch connector flex " in padded
+        ):
+            return self._lookup_ontology_code(
+                (
+                    "digitizer fpc connector on motherboard",
+                    "digitizer fpc connector",
+                    "touch connector flex",
+                ),
+                fallback="DIG-FPC",
+            )
+        if (
+            " mainboard fpc connector " in padded
+            or " main fpc connector " in padded
+            or " mainboard flex fpc connector " in padded
+            or " motherboard lcd fpc connector " in padded
+            or " mainboard lcd fpc connector " in padded
+            or " motherboard display fpc connector " in padded
+            or " mainboard display fpc connector " in padded
+            or " motherboard screen fpc connector " in padded
+            or " mainboard screen fpc connector " in padded
+            or " motherboard screen connector flex " in padded
+            or " mainboard screen connector flex " in padded
+        ):
+            return self._lookup_ontology_code(
+                (
+                    "mainboard fpc connector",
+                    "mainboard flex fpc connector",
+                    "main fpc connector",
+                ),
+                fallback="MFC-FPC",
+            )
+        if (
             " lcd fpc connector " in padded
+            or " lcd display fpc connector " in padded
             or " display connector flex " in padded
             or " screen connector flex " in padded
-            or " touch connector flex " in padded
             or " screen fpc connector " in padded
-            or " fpc connector " in padded
-        )
+        ):
+            return self._lookup_ontology_code(
+                (
+                    "lcd fpc connector",
+                    "lcd display fpc connector",
+                    "display connector flex",
+                ),
+                fallback="LCD-FPC",
+            )
+        if " fpc connector " in padded:
+            return self._lookup_ontology_code(
+                ("fpc connector",),
+                fallback="FPC-CONN",
+            )
+        return ""
 
     def _contains_backdoor_phrase(self, normalized_title: str) -> bool:
         phrases = (
@@ -4174,6 +4621,49 @@ class SKUIntelligenceEngine:
             return "ST"
         return code
 
+    def _apply_fingerprint_part_overrides(self, part_code: str, normalized_title: str) -> str:
+        code = self._canonicalize_part_code(part_code)
+        if not code:
+            return code
+        if code not in {"FS", "FR", "FP-S", "FP-R", "FP-S-FL"}:
+            return code
+
+        padded = f" {normalized_title} "
+        if code == "FP-S-FL" and any(
+            phrase in padded
+            for phrase in (
+                " flash light ",
+                " flashlight ",
+                " with flash light ",
+                " with flashlight ",
+            )
+        ):
+            return code
+
+        if any(
+            phrase in padded
+            for phrase in (
+                " fingerprint sensor ",
+                " fingerprint reader ",
+                " fingerprint scanner ",
+                " finger sensor ",
+                " fp sensor ",
+                " touch id ",
+                " fingerprint ",
+            )
+        ):
+            return "FS"
+        return code
+
+    def _remove_redundant_variant_tokens(self, part_code: str, variant: str) -> str:
+        normalized_part = self.normalize_code(part_code)
+        variant_tokens = [token for token in self.normalize_code(variant).split() if token]
+        if not variant_tokens:
+            return ""
+        if normalized_part in BRACKET_ENCODED_PART_CODES:
+            variant_tokens = [token for token in variant_tokens if token != "BRKT"]
+        return " ".join(dict.fromkeys(variant_tokens))
+
     def _apply_pixel_part_overrides(self, part_code: str, brand: str, normalized_title: str) -> str:
         """Pixel-specific formatting while keeping existing ontology codes for other brands."""
         code = self._canonicalize_part_code(part_code)
@@ -4225,6 +4715,7 @@ class SKUIntelligenceEngine:
         part_code = self._canonicalize_part_code(parsed.part_code)
         part_code = self._apply_backdoor_attributes(part_code, normalized_title)
         part_code = self._apply_sim_tray_mode(part_code, normalized_title)
+        part_code = self._apply_fingerprint_part_overrides(part_code, normalized_title)
         part_code = self._apply_pixel_part_overrides(part_code, parsed.brand, normalized_title)
 
         variant_tokens: list[str] = []
@@ -4234,7 +4725,10 @@ class SKUIntelligenceEngine:
         for token in self.normalize_code(self._detect_variant(normalized_title)).split():
             if token and token not in variant_tokens:
                 variant_tokens.append(token)
-        variant = " ".join(variant_tokens)
+        pin_variant = self._detect_pin_variant(normalized_title, part_code)
+        if pin_variant and pin_variant not in variant_tokens:
+            variant_tokens.append(pin_variant)
+        variant = self._remove_redundant_variant_tokens(part_code, " ".join(variant_tokens))
 
         pixel_brand = self.normalize_code(parsed.brand) == "PIXEL"
         color = self._compress_color_token(parsed.color, compress=not pixel_brand)
@@ -4312,11 +4806,12 @@ class SKUIntelligenceEngine:
         product_description: str,
     ) -> tuple[str, float, str, str, str, str, str, str, str]:
         normalized_name = self.normalize_text(product_name)
+        normalized_name = self._normalize_compact_model_tokens(normalized_name)
         corrected_name, _name_correction_confidence, _name_correction_method, _name_corrections = self._normalize_with_token_corrections_scored(
             normalized_name,
             learn=False,
         )
-        parsing_name = self._normalize_pixel_title(corrected_name)
+        parsing_name = self._normalize_compact_model_tokens(self._normalize_pixel_title(corrected_name))
         (
             remembered_title,
             remembered_brand,
@@ -4327,12 +4822,13 @@ class SKUIntelligenceEngine:
 
         title_source = f"{product_name} {product_description}".strip()
         normalized_title = self.normalize_text(title_source)
+        normalized_title = self._normalize_compact_model_tokens(normalized_title)
         normalized_hint = self.normalize_text(f"{product_sku} {product_web_sku} {product_description}")
         corrected_title, correction_confidence, correction_method, _corrections = self._normalize_with_token_corrections_scored(
             normalized_title,
             learn=False,
         )
-        parsing_title = self._normalize_pixel_title(corrected_title)
+        parsing_title = self._normalize_compact_model_tokens(self._normalize_pixel_title(corrected_title))
 
         if self._should_filter_display_assembly(normalized_title):
             return (
@@ -4384,8 +4880,9 @@ class SKUIntelligenceEngine:
             normalized_hint=normalized_hint,
         )
 
-        if self._is_fpc_connector_context(parsing_title):
-            part_code = "FPC"
+        fpc_context_code = self._resolve_fpc_connector_context(parsing_title)
+        if fpc_context_code:
+            part_code = fpc_context_code
             reason = "fpc_connector_context"
             base_conf = max(base_conf, 0.96)
 
@@ -4400,6 +4897,7 @@ class SKUIntelligenceEngine:
         part_code = self._apply_backdoor_attributes(part_code, parsing_title)
         part_code = self._apply_contextual_part_code_rules(part_code, brand, parsing_title)
         part_code = self._apply_sim_tray_mode(part_code, normalized_title)
+        part_code = self._apply_fingerprint_part_overrides(part_code, parsing_title)
         part_code = self._apply_pixel_part_overrides(part_code, brand, parsing_title)
         if correction_confidence < 0.95:
             if correction_confidence >= 0.90:
@@ -4414,6 +4912,13 @@ class SKUIntelligenceEngine:
             reason = f"{reason}+{title_memory_reason}"
 
         variant = self._detect_variant(parsing_title)
+        pin_variant = self._detect_pin_variant(parsing_title, part_code)
+        if pin_variant:
+            variant_tokens = [token for token in self.normalize_code(variant).split() if token]
+            if pin_variant not in variant_tokens:
+                variant_tokens.append(pin_variant)
+            variant = " ".join(variant_tokens)
+        variant = self._remove_redundant_variant_tokens(part_code, variant)
         pixel_brand = self.normalize_code(brand) == "PIXEL"
         color = self._detect_color(parsing_title, compress=not pixel_brand)
 
@@ -4563,11 +5068,12 @@ class SKUIntelligenceEngine:
         parsed = self.parse_title(title_text, product_sku, product_web_sku, description_text)
 
         normalized = self.normalize_text(f"{title_text} {description_text}".strip())
+        normalized = self._normalize_compact_model_tokens(normalized)
         corrected_title, _corr_conf, _corr_method, corrections = self._normalize_with_token_corrections_scored(
             normalized,
             learn=False,
         )
-        corrected_title = self._normalize_pixel_title(corrected_title)
+        corrected_title = self._normalize_compact_model_tokens(self._normalize_pixel_title(corrected_title))
 
         primary_part, secondary_part = self._split_primary_secondary_part(parsed.part_code)
         model_component = " ".join(token for token in (parsed.brand, parsed.model) if token).strip()
@@ -4814,7 +5320,9 @@ class SKUIntelligenceEngine:
             self._component_vocab = self._build_component_vocabulary()
             self._component_vocab_list = tuple(sorted(self._component_vocab))
             self._rebuild_phonetic_indexes()
+            self._rebuild_phrase_correction_items()
             self._correct_token_cached.cache_clear()
+            self._normalize_with_token_corrections_scored_cached.cache_clear()
             self._rebuild_vector_index()
             self._parse_cached.cache_clear()
 

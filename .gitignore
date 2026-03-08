@@ -10,7 +10,7 @@ dist/
 downloads/
 eggs/
 .eggs/
-lib/
+/lib/
 lib64/
 parts/
 sdist/
@@ -44,6 +44,7 @@ yarn-error.log*
 .next/
 out/
 build/
+frontend/tsconfig.tsbuildinfo
 
 # IDEs
 .idea/
@@ -60,5 +61,10 @@ build/
 # Project specifics
 outputs/
 uploads/
+logs/
 *.log
+*.pid
+cloudflared
+cloudflared.tgz
 data/runtime/
+.pytest_cache/

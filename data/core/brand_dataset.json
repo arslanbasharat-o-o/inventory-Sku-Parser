@@ -28,7 +28,13 @@
         "mini",
         "plus",
         "pro",
-        "se"
+        "se",
+        "iwatch",
+        "watch se",
+        "watch ultra",
+        "ipad air",
+        "ipad mini",
+        "ipad pro"
       ]
     },
     "asus": {
@@ -124,7 +130,13 @@
         "pixel",
         "pro",
         "ultra",
-        "xl"
+        "xl",
+        "pixel 8a",
+        "pixel 9",
+        "pixel 9 pro",
+        "pixel 9 pro xl",
+        "pixel 9 pro fold",
+        "pixel 10"
       ]
     },
     "honor": {
@@ -154,7 +166,11 @@
         "plus",
         "pro",
         "view",
-        "x"
+        "x",
+        "200",
+        "magic6",
+        "magic7",
+        "x9b"
       ]
     },
     "htc": {
@@ -341,7 +357,15 @@
         "plus",
         "pro",
         "razr",
-        "z"
+        "z",
+        "razr+",
+        "razr 40",
+        "edge+",
+        "ace",
+        "g72",
+        "g73",
+        "g84",
+        "g85"
       ]
     },
     "nokia": {
@@ -417,7 +441,11 @@
         "pro",
         "r",
         "t",
-        "ultra"
+        "ultra",
+        "nord ce",
+        "nord n",
+        "ace",
+        "fold"
       ]
     },
     "oppo": {
@@ -449,7 +477,13 @@
         "pro",
         "r",
         "reno",
-        "x"
+        "x",
+        "reno10",
+        "reno11",
+        "reno12",
+        "find x6",
+        "find x7",
+        "find x8"
       ]
     },
     "poco": {
@@ -509,7 +543,10 @@
         "plus",
         "pro",
         "ultra",
-        "x"
+        "x",
+        "gt6",
+        "c67",
+        "c75"
       ]
     },
     "redmi": {
@@ -580,7 +617,14 @@
         "s",
         "tab",
         "ultra",
-        "z"
+        "z",
+        "xcover",
+        "mega",
+        "alpha",
+        "avant",
+        "on5",
+        "ace",
+        "quantum"
       ]
     },
     "sony": {
@@ -684,7 +728,11 @@
         "t",
         "v",
         "x",
-        "y"
+        "y",
+        "v29",
+        "v30",
+        "x100",
+        "x200"
       ]
     },
     "xiaomi": {
@@ -719,7 +767,11 @@
         "poco",
         "pro",
         "redmi",
-        "ultra"
+        "ultra",
+        "13t",
+        "14t",
+        "number",
+        "redmi note"
       ]
     },
     "zte": {
@@ -737,6 +789,38 @@
         "nubia",
         "plus",
         "pro"
+      ]
+    },
+    "itel": {
+      "canonical": "ITEL",
+      "sku_prefix": "ITEL",
+      "model_prefix": "ITEL",
+      "aliases": [
+        "ittel",
+        "itel mobile",
+        "itel africa"
+      ],
+      "series_keywords": [
+        "a",
+        "p",
+        "s",
+        "vision"
+      ]
+    },
+    "samsung_tablet": {
+      "canonical": "SAMSUNG",
+      "sku_prefix": "GALAXY",
+      "model_prefix": "GALAXY",
+      "aliases": [
+        "samsung tab",
+        "galaxy tab"
+      ],
+      "series_keywords": [
+        "tab",
+        "tab a",
+        "tab s",
+        "tab e",
+        "tab active"
       ]
     }
   },
@@ -1062,6 +1146,11 @@
     "zenfone": "asus",
     "zte": "zte",
     "zte corporation": "zte",
-    "zte mobile": "zte"
+    "zte mobile": "zte",
+    "ittel": "itel",
+    "itel mobile": "itel",
+    "itel africa": "itel",
+    "samsung tab": "samsung_tablet",
+    "galaxy tab": "samsung_tablet"
   }
 }

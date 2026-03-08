@@ -54,6 +54,10 @@ function getApiErrorMessage(
     };
   };
 
+  if (!maybeAxios.response && !maybeAxios.code && typeof maybeAxios.message === "string" && maybeAxios.message.trim()) {
+    return maybeAxios.message.trim();
+  }
+
   if (!maybeAxios.response) {
     if (serviceUrl) {
       return `Cannot connect to parser backend at ${serviceUrl}. Start the backend server and retry.`;
@@ -94,6 +98,7 @@ export default function Dashboard() {
   const [file, setFile] = useState<File | null>(null);
   const [isDragging, setIsDragging] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
+  const [bulkProgressText, setBulkProgressText] = useState<string | null>(null);
   const [data, setData] = useState<ParseResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [singleTitle, setSingleTitle] = useState("");
@@ -229,11 +234,16 @@ export default function Dashboard() {
 
     setIsGenerating(true);
     setError(null);
+    setBulkProgressText("Uploading inventory file...");
 
     try {
-      const response = await parseInventory(file);
+      const response = await parseInventory(file, {
+        onProgress: (message) => setBulkProgressText(message),
+      });
       setData(response);
+      setBulkProgressText(null);
     } catch (err) {
+      setBulkProgressText(null);
       setError(
         getApiErrorMessage(
           err,
@@ -250,6 +260,7 @@ export default function Dashboard() {
     setData(null);
     setFile(null);
     setError(null);
+    setBulkProgressText(null);
   };
 
   const handleDownload = () => {
@@ -663,6 +674,11 @@ export default function Dashboard() {
                   isGenerating={isGenerating}
                   hasData={!!data}
                 />
+                {(isGenerating || bulkProgressText) && (
+                  <p className="mt-3 text-sm text-gray-600">
+                    {bulkProgressText || "Processing inventory file..."}
+                  </p>
+                )}
               </div>
             </div>
           </div>

@@ -154,7 +154,10 @@ def _get_client() -> OpenAI | None:
 def _get_structured_service() -> StructuredSKUParserService:
     global _structured_service
     if _structured_service is None:
-        _structured_service = StructuredSKUParserService(enable_ai=True)
+        _structured_service = StructuredSKUParserService(
+            enable_ai=True,
+            db_path=os.getenv("SKU_PARSE_DB_PATH", "data/runtime/structured_sku_results.db"),
+        )
     return _structured_service
 
 

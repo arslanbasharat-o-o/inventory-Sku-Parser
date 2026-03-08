@@ -118,6 +118,19 @@ function SubmitButton({
   );
 }
 
+const EMPTY_TITLE_TRAINING = {
+  product_title: "",
+  detected_model: "",
+  detected_part: "",
+  detected_color: "",
+  expected_sku: "",
+};
+const EMPTY_SYNONYM = { supplier_phrase: "", standard_term: "" };
+const EMPTY_SPELLING = { incorrect_word: "", correct_word: "" };
+const EMPTY_PART = { phrase: "", sku_code: "" };
+const EMPTY_COLOR = { supplier_color: "", standard_color: "" };
+const EMPTY_SKU_CORRECTION = { generated_sku: "", correct_sku: "", title: "" };
+
 export default function TrainingDashboardPage() {
   const [bootstrap, setBootstrap] = useState<TrainingBootstrapResponse | null>(null);
   const [loading, setLoading] = useState(true);
@@ -125,19 +138,12 @@ export default function TrainingDashboardPage() {
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
 
-  const [titleTraining, setTitleTraining] = useState({
-    product_title: "",
-    detected_model: "",
-    detected_part: "",
-    detected_color: "",
-    expected_sku: "",
-  });
-
-  const [synonymTraining, setSynonymTraining] = useState({ supplier_phrase: "", standard_term: "" });
-  const [spellingTraining, setSpellingTraining] = useState({ incorrect_word: "", correct_word: "" });
-  const [partTraining, setPartTraining] = useState({ phrase: "", sku_code: "" });
-  const [colorTraining, setColorTraining] = useState({ supplier_color: "", standard_color: "" });
-  const [skuCorrection, setSkuCorrection] = useState({ generated_sku: "", correct_sku: "", title: "" });
+  const [titleTraining, setTitleTraining] = useState({ ...EMPTY_TITLE_TRAINING });
+  const [synonymTraining, setSynonymTraining] = useState({ ...EMPTY_SYNONYM });
+  const [spellingTraining, setSpellingTraining] = useState({ ...EMPTY_SPELLING });
+  const [partTraining, setPartTraining] = useState({ ...EMPTY_PART });
+  const [colorTraining, setColorTraining] = useState({ ...EMPTY_COLOR });
+  const [skuCorrection, setSkuCorrection] = useState({ ...EMPTY_SKU_CORRECTION });
   const [ruleText, setRuleText] = useState("");
 
   const [uploadFile, setUploadFile] = useState<File | null>(null);
@@ -146,6 +152,20 @@ export default function TrainingDashboardPage() {
   const [liveTitle, setLiveTitle] = useState("");
   const [liveResult, setLiveResult] = useState<TrainingLiveTestResponse | null>(null);
   const [liveLoading, setLiveLoading] = useState(false);
+
+  // Auto-dismiss success toast after 4s
+  useEffect(() => {
+    if (!success) return;
+    const timer = setTimeout(() => setSuccess(null), 4000);
+    return () => clearTimeout(timer);
+  }, [success]);
+
+  // Auto-dismiss error toast after 6s
+  useEffect(() => {
+    if (!error) return;
+    const timer = setTimeout(() => setError(null), 6000);
+    return () => clearTimeout(timer);
+  }, [error]);
 
   const loadBootstrap = async () => {
     setLoading(true);
@@ -164,7 +184,7 @@ export default function TrainingDashboardPage() {
     void loadBootstrap();
   }, []);
 
-  const submitAction = async (action: () => Promise<unknown>, successMessage: string) => {
+  const submitAction = async (action: () => Promise<unknown>, successMessage: string, onSuccess?: () => void) => {
     setSaving(true);
     setError(null);
     setSuccess(null);
@@ -172,6 +192,7 @@ export default function TrainingDashboardPage() {
       await action();
       await loadBootstrap();
       setSuccess(successMessage);
+      onSuccess?.();
     } catch (err) {
       const message = getApiErrorMessage(err, "Training action failed.");
       setError(message);
@@ -263,14 +284,14 @@ export default function TrainingDashboardPage() {
 
       <main className="mx-auto mt-6 max-w-7xl space-y-6 px-4 sm:px-6 lg:px-8">
         {error && (
-          <div className="flex items-center gap-2 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
-            <AlertTriangle className="h-4 w-4" />
+          <div className="flex items-center gap-2 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700 transition-opacity">
+            <AlertTriangle className="h-4 w-4 shrink-0" />
             {error}
           </div>
         )}
         {success && (
-          <div className="flex items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">
-            <CheckCircle2 className="h-4 w-4" />
+          <div className="flex items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700 transition-opacity">
+            <CheckCircle2 className="h-4 w-4 shrink-0" />
             {success}
           </div>
         )}
@@ -292,6 +313,7 @@ export default function TrainingDashboardPage() {
             </section>
 
             <section className="grid grid-cols-1 gap-6 xl:grid-cols-2">
+              {/* 1. Title Training Panel */}
               <Panel title="1. Title Training Panel">
                 <InputField
                   value={titleTraining.product_title}
@@ -324,6 +346,7 @@ export default function TrainingDashboardPage() {
                     void submitAction(
                       () => addTitleTrainingSample(titleTraining),
                       "Title training sample saved.",
+                      () => setTitleTraining({ ...EMPTY_TITLE_TRAINING }),
                     );
                   }}
                 >
@@ -332,8 +355,18 @@ export default function TrainingDashboardPage() {
                 <p className="text-xs text-gray-500">
                   Samples: {bootstrap?.meta.training_example_count ?? 0}
                 </p>
+                {(bootstrap?.title_training_samples ?? []).length > 0 && (
+                  <div className="max-h-36 overflow-auto rounded-lg border border-gray-100 bg-gray-50 p-2 text-xs">
+                    {(bootstrap?.title_training_samples ?? []).slice(-5).reverse().map((row, idx) => (
+                      <div key={`tt-${idx}`} className="py-0.5 text-gray-700">
+                        <span className="font-medium">{row.product_title}</span> → {row.expected_sku}
+                      </div>
+                    ))}
+                  </div>
+                )}
               </Panel>
 
+              {/* 2. Synonym Training */}
               <Panel title="2. Synonym Training">
                 <InputField
                   value={synonymTraining.supplier_phrase}
@@ -351,6 +384,7 @@ export default function TrainingDashboardPage() {
                     void submitAction(
                       () => addSynonymTraining(synonymTraining),
                       "Synonym mapping saved.",
+                      () => setSynonymTraining({ ...EMPTY_SYNONYM }),
                     );
                   }}
                 >
@@ -365,6 +399,7 @@ export default function TrainingDashboardPage() {
                 </div>
               </Panel>
 
+              {/* 3. Spelling Correction Training */}
               <Panel title="3. Spelling Correction Training">
                 <InputField
                   value={spellingTraining.incorrect_word}
@@ -382,13 +417,24 @@ export default function TrainingDashboardPage() {
                     void submitAction(
                       () => addSpellingTraining(spellingTraining),
                       "Spelling correction saved.",
+                      () => setSpellingTraining({ ...EMPTY_SPELLING }),
                     );
                   }}
                 >
                   <SubmitButton label="Add Spelling Rule" loading={saving} />
                 </form>
+                {(bootstrap?.spelling_corrections ?? []).length > 0 && (
+                  <div className="max-h-36 overflow-auto rounded-lg border border-gray-100 bg-gray-50 p-2 text-xs">
+                    {(bootstrap?.spelling_corrections ?? []).slice(0, 10).map((row, idx) => (
+                      <div key={`sp-${idx}`} className="py-0.5 text-gray-700">
+                        {row.incorrect} → {row.correct}
+                      </div>
+                    ))}
+                  </div>
+                )}
               </Panel>
 
+              {/* 4. Part Ontology Manager */}
               <Panel title="4. Part Ontology Manager">
                 <InputField
                   value={partTraining.phrase}
@@ -406,6 +452,7 @@ export default function TrainingDashboardPage() {
                     void submitAction(
                       () => addPartOntologyTraining(partTraining),
                       "Part ontology mapping saved.",
+                      () => setPartTraining({ ...EMPTY_PART }),
                     );
                   }}
                 >
@@ -420,6 +467,7 @@ export default function TrainingDashboardPage() {
                 </div>
               </Panel>
 
+              {/* 5. Color Training */}
               <Panel title="5. Color Training">
                 <InputField
                   value={colorTraining.supplier_color}
@@ -437,13 +485,24 @@ export default function TrainingDashboardPage() {
                     void submitAction(
                       () => addColorTraining(colorTraining),
                       "Color mapping saved.",
+                      () => setColorTraining({ ...EMPTY_COLOR }),
                     );
                   }}
                 >
                   <SubmitButton label="Save Color Mapping" loading={saving} />
                 </form>
+                {(bootstrap?.color_mappings ?? []).length > 0 && (
+                  <div className="max-h-36 overflow-auto rounded-lg border border-gray-100 bg-gray-50 p-2 text-xs">
+                    {(bootstrap?.color_mappings ?? []).slice(0, 10).map((row, idx) => (
+                      <div key={`cl-${idx}`} className="py-0.5 text-gray-700">
+                        {row.supplier_color} → {row.standard_color}
+                      </div>
+                    ))}
+                  </div>
+                )}
               </Panel>
 
+              {/* 6. SKU Correction Panel */}
               <Panel title="6. SKU Correction Panel">
                 <InputField
                   value={skuCorrection.generated_sku}
@@ -466,13 +525,24 @@ export default function TrainingDashboardPage() {
                     void submitAction(
                       () => addSkuCorrectionTraining(skuCorrection),
                       "SKU correction saved.",
+                      () => setSkuCorrection({ ...EMPTY_SKU_CORRECTION }),
                     );
                   }}
                 >
                   <SubmitButton label="Save SKU Correction" loading={saving} />
                 </form>
+                {(bootstrap?.sku_corrections ?? []).length > 0 && (
+                  <div className="max-h-36 overflow-auto rounded-lg border border-gray-100 bg-gray-50 p-2 text-xs">
+                    {(bootstrap?.sku_corrections ?? []).slice(0, 10).map((row, idx) => (
+                      <div key={`sc-${idx}`} className="py-0.5 text-gray-700">
+                        {row.generated_sku} → {row.correct_sku}
+                      </div>
+                    ))}
+                  </div>
+                )}
               </Panel>
 
+              {/* 7. Dataset Training Upload */}
               <Panel title="7. Dataset Training Upload">
                 <form onSubmit={handleUploadDataset} className="space-y-3">
                   <label className="flex cursor-pointer items-center gap-2 rounded-lg border border-dashed border-gray-300 bg-gray-50 px-3 py-3 text-sm text-gray-700">
@@ -506,6 +576,7 @@ export default function TrainingDashboardPage() {
                 )}
               </Panel>
 
+              {/* 8. Rule Editor */}
               <Panel title="8. Rule Editor">
                 <form
                   onSubmit={(event) => {
@@ -513,6 +584,7 @@ export default function TrainingDashboardPage() {
                     void submitAction(
                       () => addRuleTraining({ rule_text: ruleText }),
                       "Rule saved to learned patterns.",
+                      () => setRuleText(""),
                     );
                   }}
                   className="space-y-3"
@@ -528,6 +600,7 @@ export default function TrainingDashboardPage() {
                 </form>
               </Panel>
 
+              {/* 10. Live Title Tester */}
               <Panel title="10. Live Title Tester">
                 <form onSubmit={handleLiveTest} className="space-y-3">
                   <textarea
@@ -558,8 +631,9 @@ export default function TrainingDashboardPage() {
               </Panel>
             </section>
 
+            {/* 9. Training Analytics Detail */}
             <Panel title="9. Training Analytics Detail">
-              <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+              <div className="grid grid-cols-2 gap-3 md:grid-cols-3 lg:grid-cols-5">
                 <div className="rounded-lg border border-gray-200 bg-gray-50 p-3 text-sm text-gray-700">
                   Duplicate Rate: {(((analytics?.duplicate_rate ?? 0) * 100) || 0).toFixed(2)}%
                 </div>
@@ -568,6 +642,24 @@ export default function TrainingDashboardPage() {
                 </div>
                 <div className="rounded-lg border border-gray-200 bg-gray-50 p-3 text-sm text-gray-700">
                   Learned Rules: {bootstrap?.meta.rule_count ?? 0}
+                </div>
+                <div className="rounded-lg border border-gray-200 bg-gray-50 p-3 text-sm text-gray-700">
+                  Spelling Rules: {bootstrap?.meta.spelling_count ?? 0}
+                </div>
+                <div className="rounded-lg border border-gray-200 bg-gray-50 p-3 text-sm text-gray-700">
+                  Part Mappings: {bootstrap?.meta.part_mapping_count ?? 0}
+                </div>
+                <div className="rounded-lg border border-gray-200 bg-gray-50 p-3 text-sm text-gray-700">
+                  Color Mappings: {bootstrap?.meta.color_mapping_count ?? 0}
+                </div>
+                <div className="rounded-lg border border-gray-200 bg-gray-50 p-3 text-sm text-gray-700">
+                  SKU Corrections: {bootstrap?.meta.sku_correction_count ?? 0}
+                </div>
+                <div className="rounded-lg border border-gray-200 bg-gray-50 p-3 text-sm text-gray-700">
+                  Title Overrides: {bootstrap?.meta.title_override_count ?? 0}
+                </div>
+                <div className="rounded-lg border border-gray-200 bg-gray-50 p-3 text-sm text-gray-700">
+                  Training Samples: {bootstrap?.meta.training_example_count ?? 0}
                 </div>
               </div>
             </Panel>

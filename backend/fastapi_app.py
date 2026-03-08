@@ -9,6 +9,7 @@ import re
 import shutil
 import tempfile
 import uuid
+from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Literal
 
@@ -18,6 +19,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel, Field
 
+from .logging_utils import configure_backend_logging
 from .bulk_job_runner import (
     BulkJobError,
     BulkJobTimeoutError,
@@ -26,6 +28,7 @@ from .bulk_job_runner import (
     load_processed_inventory_preview,
     run_legacy_inventory_job,
     run_structured_inventory_job,
+    warm_bulk_worker_pool,
 )
 from .bulk_job_queue import BulkJobQueueManager
 from .structured_sku_parser import (
@@ -36,6 +39,7 @@ from .structured_sku_parser import (
 from .sku_parser import NOT_UNDERSTANDABLE as LEGACY_NOT_UNDERSTANDABLE
 from .training_dashboard_service import TrainingDashboardService
 
+BACKEND_LOG_FILE, BACKEND_ERROR_LOG_FILE = configure_backend_logging()
 LOGGER = logging.getLogger(__name__)
 
 
@@ -110,6 +114,9 @@ class CacheStatusResponse(BaseModel):
     candidate_pattern_count: int
     approved_spelling_count: int
     candidate_spelling_count: int
+    structured_db_path: str
+    backend_log_file: str
+    backend_error_log_file: str
 
 
 class CandidateLearningItem(BaseModel):
@@ -189,7 +196,7 @@ PARSER_SERVICE = StructuredSKUParserService(
     review_threshold=REVIEW_THRESHOLD,
     rule_accept_threshold=RULE_ACCEPT_THRESHOLD,
     cache_size=int(os.getenv("SKU_PARSE_CACHE_SIZE", "50000")),
-    db_path=os.getenv("SKU_PARSE_DB_PATH", "outputs/structured_sku_results.db"),
+    db_path=os.getenv("SKU_PARSE_DB_PATH", "data/runtime/structured_sku_results.db"),
     enable_ai=True,
 )
 TRAINING_SERVICE = TrainingDashboardService(structured_log_db_path=PARSER_SERVICE.db_path)
@@ -224,6 +231,15 @@ def _build_legacy_stats(df: pd.DataFrame) -> dict[str, int | float]:
         "title_duplicates": int(title_dup_mask.sum()),
     }
 
+@asynccontextmanager
+async def app_lifespan(_app: FastAPI):
+    try:
+        warm_bulk_worker_pool()
+    except Exception:
+        LOGGER.exception("Failed to warm bulk worker pool on startup")
+    yield
+
+
 app = FastAPI(
     title="SKU Parser Analyzer API",
     version="3.0.0",
@@ -231,6 +247,7 @@ app = FastAPI(
         "Rule-first SKU parser with Gemini/OpenAI structured-output fallback. "
         "Rule results are accepted at high confidence, and AI is only used for low-confidence interpretation."
     ),
+    lifespan=app_lifespan,
 )
 
 app.add_middleware(
@@ -249,6 +266,8 @@ def healthz() -> dict[str, str | int]:
         "ai": "enabled" if PARSER_SERVICE.ai_enabled else "disabled",
         "ai_provider": PARSER_SERVICE.ai_provider,
         "bulk_workers": MAX_CONCURRENT_BULK_JOBS,
+        "structured_db_path": str(PARSER_SERVICE.db_path),
+        "backend_log_file": str(BACKEND_LOG_FILE),
     }
 
 
@@ -518,6 +537,9 @@ def cache_status() -> CacheStatusResponse:
         candidate_pattern_count=int(learning_status["candidate_pattern_count"]),
         approved_spelling_count=int(learning_status["approved_spelling_count"]),
         candidate_spelling_count=int(learning_status["candidate_spelling_count"]),
+        structured_db_path=str(PARSER_SERVICE.db_path),
+        backend_log_file=str(BACKEND_LOG_FILE),
+        backend_error_log_file=str(BACKEND_ERROR_LOG_FILE),
     )
 
 

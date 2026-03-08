@@ -36,7 +36,7 @@ class TrainingDashboardService:
         self,
         *,
         base_dir: str | Path | None = None,
-        structured_log_db_path: str | Path = "outputs/structured_sku_results.db",
+        structured_log_db_path: str | Path = "data/runtime/structured_sku_results.db",
     ) -> None:
         self.base_dir = Path(base_dir).resolve() if base_dir else RUNTIME_DATA_DIR
         self.structured_log_db_path = Path(structured_log_db_path)
